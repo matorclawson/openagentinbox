@@ -1,0 +1,1 @@
+Runtime sources from the supplied Ephemeral v0.2.1 release. OpenAgentInbox selects its portable modernc SQLite backend for all builds, including race-enabled builds. The only runtime source adjustment removes the !cgo build constraint from sqlite_portable.go.

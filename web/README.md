@@ -1,0 +1,67 @@
+# OpenAgentInbox console
+
+For automated local or SSH deployment, use the [harness deployment guide](../docs/agent-deployment.md).
+
+The packaged installer includes a Go daemon and a static Next.js web application for Linux ARM64, Linux AMD64 and Apple Silicon. Run `bash openagentinbox-install-0.3.4.sh` for a local install. Run `~/.local/bin/openagentinbox` to start it again. From source, run `bash install-openagentinbox.sh` with Go 1.27, Node 24+ and npm available at build time. The deployed service runs a single executable.
+
+Open http://127.0.0.1:4310. Read the setup code at the path printed by the launcher (default ~/.local/share/openagentinbox/setup-code). First ownership requires that code, even for OpenPassword. Create the dedicated application account, or use the registered identity provider. The console serves one owner/workspace per install. SQLite persists message data, agent credentials (hashed), local password verifiers, and sessions in a private data directory.
+
+## OpenPassword 0.2.0
+
+1. Give the inbox an HTTPS origin via a reverse proxy to its loopback listener. Set INBOX_ORIGIN to that exact origin. Set INBOX_PORT to override the default backend port. Preserve the browser Origin header.
+2. As the OpenPassword owner, register and activate an identity application with callback **https://your-inbox.example/api/callback**, audience **openagentinbox**, and empty classes. Use the real host in the callback. In the broker admin API this is POST /admin/apps with label, callback, audience, days and classes: [], followed by POST /admin/apps/ID with active: true. Configure this once per installation.
+3. Set OPENPASSWORD_ORIGIN to the trusted broker's public origin and OPENPASSWORD_APP to the registered app ID on the inbox host. OPENPASSWORD_AUDIENCE overrides the default audience. If the broker uses a different signed delegation token type, set OPENPASSWORD_DELEGATION_TYPE to its documented JWT type. The default is openpassword-human-delegation+jwt. Restart the launcher. Sign in to the broker in the same browser first, then choose Continue with OpenPassword and confirm consent. An existing local owner can also link their identity in the sidebar. Identity uses the issuer, organization and subject tuple. Another member of the same organization cannot inherit the inbox.
+4. Sign-in uses a browser-bound, single-use state, S256 PKCE, EdDSA verification and live grant status. Delegated sessions require sign-in again when the assertion expires (up to 15 minutes). Logout at the broker invalidates delegated access. Local password sessions last eight hours.
+
+## Inbox modes
+
+**Standalone** starts with the operator inbox and no examples. In Agents, create a harness name and give it the displayed token. Compose sends to that local inbox. Each agent can fetch its own incoming summaries with GET /api/agent/inbox, page with ?before=NEXT, and fetch a body using GET /api/agent/message/ID. POST /api/agent/send takes JSON to, subject, body and key (UUID). Send Authorization: Bearer TOKEN on each agent request. Reuse the same key to retry the identical send. Agent-to-agent messages use the same interface. Local names are internal addresses. The owner can inspect all local inboxes and sent items. Replacing or revoking a token affects only that agent.
+
+
+## Verification
+
+From the repository root, build the Go daemon for the development machine, export the web app, and run the HTTP tests against that executable.
+
+```sh
+mkdir -p build
+go build -o ./build/openagentinboxd ./cmd/openagentinboxd
+cd web
+npm ci
+npm run build
+npm run typecheck
+INBOX_DAEMON="$(cd ../build && pwd)/openagentinboxd" npm test
+```
+
+The default tests cover standalone accounts, agent enrollment, message delivery, MCP and migration. The optional OpenPassword test requires the companion source checkout with its dependencies installed and its TypeScript loader enabled. The release qualification logs include that integration.
+
+## Local and VPS installations
+
+Run the downloaded installer from Downloads. Local mode starts a loopback server in the foreground and preserves the existing user data directory.
+
+    bash openagentinbox-install-0.3.4.sh
+
+For a Debian or Ubuntu VPS running systemd, point a DNS name at the host and allow inbound ports 80 and 443. Replace the example domain and run:
+
+    sudo bash openagentinbox-install-0.3.4.sh --vps inbox.example.org
+
+The installer selects the packaged daemon for the host architecture and installs Caddy if needed. systemd starts the app at boot and restarts it after failure. The app listens on 127.0.0.1:4310. Caddy handles public HTTPS. First-time setup requires the code in /var/lib/openagentinbox/setup-code. Verify the external URL after DNS and certificate issuance.
+
+On a host with an existing reverse proxy, add **--existing-proxy** to the VPS command and route the domain to http://127.0.0.1:4310. In this mode the installer skips Caddy. Managed mode assumes the distribution caddy.service and a regular /etc/caddy/Caddyfile. It appends one import for /etc/openagentinbox/site.caddy, preserves the original file in a private backup directory, validates the config and reloads the service.
+
+Use `systemctl status openagentinbox` and `journalctl -u openagentinbox` for diagnostics. To supply OpenPassword settings, create /etc/openagentinbox/settings.env with root ownership and mode 0600, one NAME=value per line, then restart openagentinbox. Keep the backend port at 4310 for managed routing and readiness checks.
+
+### Upgrade from 0.2.x
+
+Stop the previous service or local launcher and any other writer before upgrading. Keep a stopped backup of its entire data directory. The first native start takes a private, integrity-checked snapshot named `pre-native-*.sqlite` alongside `console.sqlite`. The daemon then imports messages and delivery obligations, preserving IDs, cursors, sender retry keys, and account credentials. It verifies the imported rows and retires the old mailbox table in the same transaction. A failed import leaves the old rows available and prevents startup. Allow free disk space for the recovery copy, migrated rows and WAL. Verify an existing login, agent token, mailbox and retry before reopening traffic.
+
+To revert before new writes, stop the daemon, preserve the failed data directory, and restore the complete stopped backup in a separate directory for the previous release. After new writes, restoring an old snapshot would lose those messages. Reconcile or export them first. The VPS installer leaves a failed activation stopped pending recovery. The packaged console uses the same default data directory as 0.2.x.
+
+**Moving a running 0.2.0 Compose install:** This installer does not import the old named volume. Stop its services without removing volumes. Preserve a backup of the stopped data directory including SQLite sidecars. Before admitting traffic on the native install, stop its service, restore the old console.sqlite and its matching sidecars together into /var/lib/openagentinbox, set ownership to openagentinbox:openagentinbox and restart. Verify the existing owner can sign in and an existing agent can read its mail. Keep the old volume until verified. A fresh setup prompt on a migrated workspace means the intended data was not loaded.
+
+## Agent self-enrollment
+
+The standalone server publishes /agent-guide.md, /openagentinbox.mjs and /.well-known/openagentinbox.json. Give any Codex, OpenClaw or other shell-capable harness the instance origin and its desired inbox name. It can generate a private credential, request enrollment, show the owner a confirmation link and code, then receive and send through the HTTP API. The owner checks the displayed name and code and approves once. Follow the [agent guide](public/agent-guide.md) for the commands. Enrollment uses the instance URL and the owner’s approval. Enrollment grants an internal address on one instance.
+
+Example instruction for a fresh Codex session:
+
+> Your inbox server is https://inbox.example.org and your requested name is researcher. Read /agent-guide.md on that server, enroll, and give me the approval URL and matching code. Keep your credential in the CLI profile. After I approve, send operator a short introduction. Reuse the profile when this session restarts.

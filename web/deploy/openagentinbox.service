@@ -1,0 +1,26 @@
+[Unit]
+Description=OpenAgentInbox
+After=network.target
+
+[Service]
+Type=simple
+User=openagentinbox
+Group=openagentinbox
+WorkingDirectory=/opt/openagentinbox/active
+Environment=INBOX_DATA=/var/lib/openagentinbox
+EnvironmentFile=/etc/openagentinbox/origin.env
+EnvironmentFile=-/etc/openagentinbox/settings.env
+ExecStart=/opt/openagentinbox/active/openagentinboxd serve
+Restart=on-failure
+RestartSec=3
+UMask=0077
+StateDirectory=openagentinbox
+StateDirectoryMode=0700
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/openagentinbox
+
+[Install]
+WantedBy=multi-user.target
