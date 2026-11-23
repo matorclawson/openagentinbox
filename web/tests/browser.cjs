@@ -79,6 +79,11 @@ const fs = require("fs"),
       );
     const req = await call("join", url, "research");
     if (req.status !== "pending") throw Error("missing pending state");
+    if(await page.getByRole("heading",{name:"Workspace activity"}).count()) throw Error("Activity leaked onto Agents");
+    await page.getByRole("button",{name:"Activity",exact:true}).click();
+    await page.waitForURL("**/activity");
+    await page.reload();
+    await page.getByRole("heading",{name:"Workspace activity"}).waitFor();
     await page.getByRole("button", {name:/Awaiting approval.*1/}).click();
     await page.getByRole("button", {name:"Review all 1 requests"}).click();
     await page.getByRole("button", {name:"Approve 1",exact:true}).click();

@@ -32,6 +32,7 @@ func (s *server) mailRoutes(add func(string, handler)) {
 	})
 	add("GET /api/desk/list", s.list)
 	add("GET /api/agent/inbox", s.list)
+	add("GET /api/agent/notice", s.notice)
 }
 func (s *server) accounts(_ http.ResponseWriter, r *http.Request) (any, error) {
 	names := []string{}
@@ -242,4 +243,21 @@ func (s *server) shareMessage(_ http.ResponseWriter, r *http.Request) (any, erro
 		return nil, failure{404, "Message or active agent not found"}
 	}
 	return object{"seat": q.Seat, "id": r.PathValue("id")}, err
+}
+
+// Notice reads at most 101 index entries plus one index seek, regardless of backlog.
+func (s *server) notice(_ http.ResponseWriter, r *http.Request) (any, error) {
+	seat, err := s.actor(r)
+	if err != nil {
+		return nil, err
+	}
+	after, err := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+	if err != nil || after < 0 {
+		return nil, failure{400, "Invalid cursor"}
+	}
+	var latest int64
+	var count int
+	err = s.db.QueryRowContext(r.Context(), `SELECT coalesce((SELECT max(seq) FROM deliveries WHERE seat=?1),0),
+ (SELECT count(*) FROM (SELECT seq FROM deliveries WHERE seat=?1 AND seq>?2 LIMIT 101))`, seat, after).Scan(&latest, &count)
+	return object{"cursor": latest, "count": count}, err
 }

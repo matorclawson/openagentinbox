@@ -2,6 +2,7 @@
 import { useEffect, useState, useRef, type FormEvent } from "react";
 import {
   Inbox,
+  Activity,
   Send,
   Users,
   PenLine,
@@ -101,7 +102,7 @@ export default function Home() {
   const [shareSeat, setShareSeat] = useState("");
   const parts = path.split("/");
   const box = parts[1] === "inboxes" ? parts[2] : acc?.operator ?? "operator";
-  const folder = parts[1] === "compose" ? "compose" : parts[1] === "agents" ? "agents" : parts[3] === "sent" ? "sent" : "inbox";
+  const folder = parts[1] === "activity" ? "activity" : parts[1] === "compose" ? "compose" : parts[1] === "agents" ? "agents" : parts[3] === "sent" ? "sent" : "inbox";
   const messageId = parts[1] === "messages" ? parts[2] : "";
   const     [rows, list] = useState<Row[]>([]),
     [cursor, next] = useState<string | null>(null);
@@ -214,7 +215,7 @@ export default function Home() {
     key(""); warn(""); say("");
   }
   function go(v: typeof folder, seat = box) {
-    navigate(v === "compose" || v === "agents" ? "/" + v : "/inboxes/" + encodeURIComponent(seat) + (v === "sent" ? "/sent" : ""));
+    navigate(v === "activity" || v === "compose" || v === "agents" ? "/" + v : "/inboxes/" + encodeURIComponent(seat) + (v === "sent" ? "/sent" : ""));
   }
   function follow(e: React.MouseEvent<HTMLAnchorElement>) {
     if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey && e.button === 0) {
@@ -356,7 +357,7 @@ export default function Home() {
           Compose
         </button>
         <nav>
-          {(["inbox", "sent", "agents"] as const).map(
+          {(["inbox", "sent", "agents", "activity"] as const).map(
             (v) => (
               <button
                 key={v}
@@ -368,9 +369,9 @@ export default function Home() {
                 ) : v === "sent" ? (
                   <Send />
                 ) : (
-                  <Users />
+                  v === "activity" ? <Activity /> : <Users />
                 )}
-                {v === "inbox" ? "Inbox" : v === "sent" ? "Sent" : "Agents"}
+                {v === "inbox" ? "Inbox" : v === "sent" ? "Sent" : v === "activity" ? "Activity" : "Agents"}
               </button>
             ),
           )}
@@ -412,7 +413,6 @@ export default function Home() {
         </header>
         <div className="canvas">
           {feedback}
-          {!messageId && <Workspace data={live} connection={connection} review={()=>go("agents")} openBox={name=>go("inbox",name)}/>}
           {messageId && encodeURIComponent(selected?.row.id ?? "") !== messageId ? (<p>{error ? "Message unavailable." : "Opening message…"}</p>) : selected && messageId ? (
             <>
               <button onClick={() => history.state?.from ? history.back() : go("inbox",selected.row.dst.split(", ")[0])}>
@@ -450,6 +450,8 @@ export default function Home() {
                 )}
               </article>
             </>
+          ) : folder === "activity" ? (
+            <Workspace data={live} connection={connection} review={()=>go("agents")} openBox={name=>go("inbox",name)}/>
           ) : folder === "compose" ? (
             <>
               <h1>New message</h1>

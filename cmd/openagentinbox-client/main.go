@@ -211,11 +211,11 @@ func watch(ctx context.Context, path string, p profile) error {
 	return nil
 }
 
-const usage = "openagentinbox-client [--seat NAME] whoami | verify ORIGIN CURRENT_NAME [MAILBOX_ID] | use-name ORIGIN CURRENT_NAME MAILBOX_ID | bind ORIGIN --token-stdin | login ORIGIN | status ORIGIN | tickets ORIGIN DIRECTORY | join ORIGIN NAME [--ticket-stdin] | host-info ORIGIN | handshake ORIGIN DIRECTORY | inbox [BEFORE] | read ID | send TO SUBJECT BODY [UUID] | watch"
+const usage = "openagentinbox-client [--seat NAME] whoami | verify ORIGIN CURRENT_NAME [MAILBOX_ID] | use-name ORIGIN CURRENT_NAME MAILBOX_ID | bind ORIGIN --token-stdin | login ORIGIN | status ORIGIN | tickets ORIGIN DIRECTORY | join ORIGIN NAME [--ticket-stdin] | host-info ORIGIN | handshake ORIGIN DIRECTORY | inbox [BEFORE] | read ID | send TO SUBJECT BODY [UUID] | watch | notify help"
 
 func run(ctx context.Context, args []string) error {
 	if len(args) == 1 && args[0] == "version" {
-		fmt.Println("0.7.0")
+		fmt.Println("0.8.0")
 		return nil
 	}
 	if len(args) == 0 || args[0] == "help" {
@@ -238,7 +238,7 @@ func run(ctx context.Context, args []string) error {
 		seat, args = args[1], args[2:]
 		path = filepath.Join(home, ".config/openagentinbox/seats", seat+".json")
 		switch args[0] {
-		case "whoami", "use-name", "bind", "verify", "inbox", "read", "send", "watch", "join":
+		case "notify", "whoami", "use-name", "bind", "verify", "inbox", "read", "send", "watch", "join":
 		default:
 			return errors.New("expected a seat command")
 		}
@@ -414,6 +414,8 @@ func run(ctx context.Context, args []string) error {
 			}
 			p.Name = a[1]
 			return installProfile(filepath.Join(filepath.Dir(path), p.Name+".json"), p)
+		case cmd == "notify":
+			return notifications(ctx, path, p, a)
 		case cmd == "verify" && (len(a) == 2 || len(a) == 3):
 			if p.Origin != a[0] {
 				return errors.New("profile belongs to a different workspace")
