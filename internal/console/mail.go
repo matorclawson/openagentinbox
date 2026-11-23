@@ -21,6 +21,11 @@ func (s *server) mailRoutes(add func(string, handler)) {
 		add("POST /api/"+a+"/send", s.send)
 		add("GET /api/"+a+"/message/{id}", s.detail)
 	}
+	add("POST /api/desk/message/{id}/share", s.shareMessage)
+	add("GET /api/agent/whoami", func(_ http.ResponseWriter, r *http.Request) (any, error) {
+		name, err := s.actor(r)
+		return object{"name": name}, err
+	})
 	add("GET /api/desk/list", s.list)
 	add("GET /api/agent/inbox", s.list)
 }
@@ -202,9 +207,31 @@ func (s *server) detail(_ http.ResponseWriter, r *http.Request) (any, error) {
 	query := "SELECT m.sender,d.seat,m.subject,m.body,m.created_text FROM messages m JOIN deliveries d USING(seq) WHERE m.id=?"
 	args := []any{id}
 	if strings.HasPrefix(r.URL.Path, "/api/agent/") {
-		query += " AND d.seat=?"
-		args = append(args, actor)
+		query += " AND (d.seat=? OR EXISTS(SELECT 1 FROM message_readers WHERE id=m.id AND seat=?))"
+		args = append(args, actor, actor)
 	}
 	e = s.db.QueryRowContext(r.Context(), query, args...).Scan(&src, &dst, &sub, &body, &at)
 	return object{"id": id, "src": src, "dst": dst, "subject": sub, "body": body, "at": at}, e
+}
+
+func (s *server) shareMessage(_ http.ResponseWriter, r *http.Request) (any, error) {
+	var q struct{ Seat string }
+	if err := input(r, &q); err != nil {
+		return nil, err
+	}
+	if !nameRE.MatchString(q.Seat) {
+		return nil, failure{400, "Invalid inbox name"}
+	}
+	// Selecting both records also makes repeated grants idempotent.
+	result, err := s.db.ExecContext(r.Context(), `INSERT INTO message_readers(id,seat)
+        SELECT m.id,a.name FROM messages m JOIN agents a ON a.name=? AND a.key IS NOT NULL
+        WHERE m.id=? ON CONFLICT(id,seat) DO UPDATE SET seat=excluded.seat`, q.Seat, r.PathValue("id"))
+	if err != nil {
+		return nil, err
+	}
+	n, err := result.RowsAffected()
+	if err == nil && n == 0 {
+		return nil, failure{404, "Message or active agent not found"}
+	}
+	return object{"seat": q.Seat, "id": r.PathValue("id")}, err
 }

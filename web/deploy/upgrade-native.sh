@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# In-place release change for a running systemd installation.
+set -euo pipefail
+[[ $EUID == 0 && $# == 0 ]] || { echo 'Run sudo bash INSTALLER --upgrade on the VPS.' >&2; exit 2; }
+base=/opt/openagentinbox
+service=openagentinbox.service
+root=$(cd "$(dirname "$0")/../.." && pwd)
+version=0.6.0
+health=http://127.0.0.1:4310/api/health
+exec 9>"$base/install.lock"
+flock -n 9 || { echo 'Another installer is running.' >&2; exit 1; }
+previous=$(readlink -e "$base/active")
+[[ $previous == "$base/releases/"* && -x $previous/openagentinboxd ]] || exit 1
+systemctl is-active --quiet "$service"
+old=$(curl -fsS --max-time 3 "$health")
+case "$old" in
+  *'"version":"0.6.0"'*) echo '0.6.0 is already serving.'; exit 0;;
+  *'"version":"0.5.0"'*) ;;
+  *) echo 'This upgrade supports a running 0.5.0 installation.' >&2; exit 1;;
+esac
+release=$(mktemp -d "$base/releases/build.XXXXXXXX")
+bash "$root/scripts/build-console-release.sh" "$release"
+chmod -R a+rX "$release"
+# Start under the service account with a fresh private database on loopback.
+probe=$(mktemp -d)
+chown openagentinbox:openagentinbox "$probe"
+port=$((20000 + RANDOM % 20000))
+instance=$(cat /proc/sys/kernel/random/uuid)
+pid=''
+cleanup(){
+  if [[ -n $pid ]]; then kill "$pid" 2>/dev/null || true; wait "$pid" || true; fi
+  rm -rf -- "$probe"
+}
+trap cleanup EXIT
+runuser -u openagentinbox -- env -i PATH=/usr/bin:/bin HOME="$probe" INBOX_DATA="$probe" INBOX_PORT="$port" INBOX_DEPLOY_INSTANCE="$instance" "$release/openagentinboxd" serve >"$probe/log" 2>&1 9>&- &
+pid=$!
+wait_health(){
+  local target=$1 needle=$2 i
+  for ((i=0;i<40;i++)); do
+    if curl -fsS --max-time 1 "$target" 2>/dev/null | grep -Fq "$needle"; then return 0; fi
+    sleep 0.25
+  done
+  return 1
+}
+wait_health "http://127.0.0.1:$port/api/health" "$instance" &&
+curl -fsS --max-time 3 "http://127.0.0.1:$port/api/health" | grep -Fq '"version":"0.6.0"' &&
+curl -fsS --max-time 3 -o /dev/null "http://127.0.0.1:$port/inboxes/operator" || { echo 'Candidate preflight failed. Current server is still serving.' >&2; exit 1; }
+cleanup
+pid=''
+trap - EXIT
+activate(){ ln -s "$1" "$base/active.next.$$"; mv -Tf "$base/active.next.$$" "$base/active"; }
+activate "$release"
+if systemctl restart "$service" && wait_health "$health" '"version":"0.6.0"'; then
+  echo "Serving $version. Previous release retained at $previous."
+else
+  activate "$previous"
+  if systemctl restart "$service" && wait_health "$health" '"version":"0.5.0"'; then
+    echo 'Upgrade failed. Restored the previous running release.' >&2
+  else
+    echo 'Rollback readiness failed. Inspect journalctl -u openagentinbox.' >&2
+  fi
+  exit 1
+fi

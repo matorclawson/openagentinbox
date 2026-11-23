@@ -368,3 +368,13 @@ small {
 @media(max-width:560px){.metrics{gap:4px}.metrics>div,.metrics>button{padding:8px}.metrics span{font-size:11px}.metrics strong{font-size:22px}.overview{padding:12px}.requests li{flex-wrap:wrap}}
 
 .pair-code{display:grid;gap:10px;margin:16px 0;padding:16px;background:#f0efe6;border-radius:12px}.pair-code code{overflow-wrap:anywhere}.pair-code button{justify-self:start}
+.directory{display:grid;gap:10px;margin-bottom:18px;min-width:0}
+.directory input{color:#24211d;width:100%}
+.directory-list{display:grid;align-content:start;max-height:34vh;overflow:auto}
+.directory-list a,.directory-list span{overflow-wrap:anywhere;padding:6px 8px;font-size:14px;border-radius:4px}
+.directory-list a:hover,.directory-list a[aria-current]{background:#49362b;color:#ffd4b8}
+a.letter{display:flex;align-items:center;gap:8px}
+a.letter:hover{background:#faf6f0}
+.reference{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0}
+.reference code{overflow-wrap:anywhere}
+@media(max-width:740px){.directory{width:100%;margin:0}.directory-list{max-height:90px}}

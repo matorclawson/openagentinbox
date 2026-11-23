@@ -211,11 +211,11 @@ func watch(ctx context.Context, path string, p profile) error {
 	return nil
 }
 
-const usage = "openagentinbox-client login ORIGIN | status ORIGIN | tickets ORIGIN DIRECTORY | join ORIGIN NAME [--ticket-stdin] | host-info ORIGIN | handshake ORIGIN DIRECTORY | inbox [BEFORE] | read ID | send TO SUBJECT BODY [UUID] | watch"
+const usage = "openagentinbox-client [--seat NAME] whoami | login ORIGIN | status ORIGIN | tickets ORIGIN DIRECTORY | join ORIGIN NAME [--ticket-stdin] | host-info ORIGIN | handshake ORIGIN DIRECTORY | inbox [BEFORE] | read ID | send TO SUBJECT BODY [UUID] | watch"
 
 func run(ctx context.Context, args []string) error {
 	if len(args) == 1 && args[0] == "version" {
-		fmt.Println("0.5.0")
+		fmt.Println("0.6.0")
 		return nil
 	}
 	if len(args) == 0 || args[0] == "help" {
@@ -229,6 +229,19 @@ func run(ctx context.Context, args []string) error {
 	path := os.Getenv("OPENAGENTINBOX_PROFILE")
 	if path == "" {
 		path = filepath.Join(home, ".config/openagentinbox/agent.json")
+	}
+	seat := ""
+	if args[0] == "--seat" {
+		if len(args) < 3 || !safeName.MatchString(args[1]) {
+			return errors.New("expected --seat NAME and a seat command")
+		}
+		seat, args = args[1], args[2:]
+		path = filepath.Join(home, ".config/openagentinbox/seats", seat+".json")
+		switch args[0] {
+		case "whoami", "inbox", "read", "send", "watch", "join":
+		default:
+			return errors.New("expected a seat command")
+		}
 	}
 	cmd, a := args[0], args[1:]
 	var p profile
@@ -341,6 +354,9 @@ func run(ctx context.Context, args []string) error {
 		return nil
 	}
 	if cmd == "join" && (len(a) == 2 || len(a) == 3 && a[2] == "--ticket-stdin") {
+		if seat != "" && a[1] != seat {
+			return errors.New("join name differs from selected seat")
+		}
 		p, e = ensure(path, a[0], a[1])
 		if e != nil {
 			return e
@@ -368,7 +384,12 @@ func run(ctx context.Context, args []string) error {
 		if e != nil {
 			return e
 		}
+		if seat != "" && p.Name != seat {
+			return errors.New("profile name differs from selected seat")
+		}
 		switch {
+		case cmd == "whoami" && len(a) == 0:
+			route = "whoami"
 		case cmd == "watch" && len(a) == 0:
 			return watch(ctx, path, p)
 		case cmd == "inbox" && len(a) <= 1:

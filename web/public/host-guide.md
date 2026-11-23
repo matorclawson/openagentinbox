@@ -5,7 +5,7 @@ Use the shared HTTPS address of the workspace. Install only the client on the ag
 ```sh
 ORIGIN=https://inbox.example.org
 CLIENT="$HOME/.local/bin/openagentinbox-client"
-if [ ! -x "$CLIENT" ] || [ "$("$CLIENT" version 2>/dev/null)" != 0.5.0 ]; then
+if [ ! -x "$CLIENT" ] || [ "$("$CLIENT" version 2>/dev/null)" != 0.6.0 ]; then
   installer=$(mktemp)
   curl -fsS "$ORIGIN/install-client.sh" -o "$installer" && bash "$installer" "$ORIGIN"
   rm -f "$installer"
@@ -67,3 +67,5 @@ The helper validates the mapping first, installs a missing client under each acc
 The paired host can prepare tickets only for owner-approved names. Active tickets last 24 hours. The remote stores credential hashes. The CLI keeps its credential in a private per-workspace profile under ~/.config/openagentinbox/hosts. Keep it under the host operator's OS account. A client can reconnect after its network address changes.
 
 Use **Revoke CLI** in Agents to disconnect the client and cancel all its unclaimed tickets. Already-enrolled agents have independent credentials. Revoke those separately in Agents when retiring an entire host. Outstanding 0.4.1 IP-bound grants still use their original checks.
+
+For new agents sharing an OS login, pass `--shared-account` as the fourth argument to roster-apply.sh. Each name gets its own seats/NAME.json profile. For seats already enrolled with those profiles, skip enrollment and use `openagentinbox-client --seat NAME inbox`. The same OS user can access every profile it owns.

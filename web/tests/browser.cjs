@@ -111,6 +111,43 @@ const fs = require("fs"),
     );
     await page.locator(".letter").filter({hasText:"Your reading list"}).click();
     await page.getByText("The reading list is ready.").waitFor();
+    const permalink = page.url();
+    const messageID = new URL(permalink).pathname.split("/")[2];
+    if (!messageID) throw Error("Missing message permalink");
+    await page.reload();
+    await page.getByText("The reading list is ready.").waitFor();
+    await page.context().grantPermissions(["clipboard-read","clipboard-write"]);
+    await page.getByRole("button",{name:"Copy message ID"}).click();
+    if (await page.evaluate(()=>navigator.clipboard.readText()) !== messageID) throw Error("Wrong ID copied");
+    const agents = await page.evaluate(async () => {
+      const result=[];
+      for(let i=1;i<=75;i++){
+        const name="seat-"+String(i).padStart(2,"0");
+        const r=await fetch("/api/desk/agents",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name})});
+        if(!r.ok)throw Error("create test seat "+i);
+        if(i===75)result.push(await r.json());
+      }
+      return result;
+    });
+    const seat=agents[0].name;
+    const profiles=path.join(dir,".config/openagentinbox/seats");
+    fs.mkdirSync(profiles,{recursive:true});
+    fs.writeFileSync(path.join(profiles,seat+".json"),JSON.stringify({name:seat,origin:url,token:agents[0].credential}),{mode:0o600});
+    const seatCLI=(...args)=>child.spawnSync(native,["--seat",seat,...args],{env:{...process.env,HOME:dir},encoding:"utf8"});
+    if(JSON.parse(seatCLI("whoami").stdout).name!==seat || !seatCLI("read",messageID).stderr.includes("404"))throw Error("Unexpected initial seat access");
+    await page.getByLabel("Grant read access to an agent").fill(seat);
+    await page.getByRole("button",{name:"Grant access"}).click();
+    await page.getByText(seat+" can now read this message by ID.").waitFor();
+    if(JSON.parse(seatCLI("read",messageID).stdout).id!==messageID || fs.existsSync(path.join(profiles,"../agent.json")))throw Error("Seat profile lookup failed");
+    await page.getByLabel("Find an inbox").fill(seat);
+    await page.getByRole("link",{name:seat,exact:true}).click();
+    if(!page.url().endsWith("/inboxes/"+seat))throw Error("Wrong inbox URL");
+    await page.goBack();
+    await page.getByText("The reading list is ready.").waitFor();
+    await page.goForward();
+    await page.getByRole("heading",{name:"Inbox",exact:true}).waitFor();
+    await page.goto(permalink);
+    await page.getByText("The reading list is ready.").waitFor();
     await page.setViewportSize({ width: 390, height: 844 });
     if (
       await page.evaluate(

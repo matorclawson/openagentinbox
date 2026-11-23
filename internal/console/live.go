@@ -28,6 +28,7 @@ CREATE TRIGGER IF NOT EXISTS trim_lifecycle AFTER INSERT ON lifecycle BEGIN DELE
 
 // Broadcast invalidations only. SQLite supplies the current snapshot after reconnect.
 type changes struct {
+	draining      chan struct{}
 	watching      map[string]int
 	visible       map[string]bool
 	presenceTimer *time.Timer
@@ -73,12 +74,18 @@ func (c *changes) wait(r *http.Request, cursor string) (string, error) {
 	c.mu.Unlock()
 	select {
 	case <-ch:
+	case <-c.draining:
 	case <-r.Context().Done():
 	case <-time.After(18 * time.Second):
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.waiting--
+	select {
+	case <-c.draining:
+		return "", failure{503, "Server restarting"}
+	default:
+	}
 	return c.cursor(), r.Context().Err()
 }
 
@@ -410,6 +417,8 @@ func (s *server) watch(_ http.ResponseWriter, r *http.Request) (any, error) {
 			timeout = 50 * time.Second
 		}
 		select {
+		case <-s.live.draining:
+			return nil, failure{503, "Server restarting"}
 		case <-w.Changes():
 		case <-r.Context().Done():
 			return nil, r.Context().Err()

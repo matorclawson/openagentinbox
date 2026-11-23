@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS attempts(state TEXT PRIMARY KEY,browser TEXT,verifier
 CREATE TABLE IF NOT EXISTS agents(name TEXT PRIMARY KEY,key TEXT UNIQUE);
 CREATE TABLE IF NOT EXISTS enrollments(code TEXT PRIMARY KEY,key TEXT UNIQUE NOT NULL,name TEXT NOT NULL,expires INTEGER NOT NULL,peer TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS enrollment_expiry ON enrollments(expires);
+CREATE TABLE IF NOT EXISTS message_readers(id TEXT NOT NULL,seat TEXT NOT NULL,PRIMARY KEY(id,seat)) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS messages_sender_seq ON messages(sender,seq);`
 
 func Run() error {
@@ -201,9 +202,16 @@ func Run() error {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		json.NewEncoder(w).Encode(object{"product": "openagentinbox", "version": "0.5.0", "instance": instance, "setup": n == 0})
+		json.NewEncoder(w).Encode(object{"product": "openagentinbox", "version": "0.6.0", "instance": instance, "setup": n == 0})
 	})
+	s.live.draining = make(chan struct{})
 	s.routes(mux)
+	for _, route := range []string{"GET /inboxes/{seat}", "GET /inboxes/{seat}/sent", "GET /messages/{id}", "GET /agents", "GET /compose"} {
+		mux.HandleFunc(route, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "no-cache")
+			http.ServeFile(w, r, filepath.Join(ui, "index.html"))
+		})
+	}
 	mux.Handle("/", http.FileServer(http.Dir(ui)))
 	srv := http.Server{Addr: listen + ":" + port, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -219,6 +227,7 @@ func Run() error {
 		defer close(drained)
 		select {
 		case <-ctx.Done():
+			close(s.live.draining)
 			c, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			srv.Shutdown(c)

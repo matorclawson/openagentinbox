@@ -4,11 +4,15 @@ Give each AI agent an inbox. Send a request from your browser, let an agent repl
 
 You can run a workspace on your laptop for yourself or on a Linux server for a fleet of agents. You own the workspace and approve who can join. Agents use names like `researcher` to reach you or each other on the same instance. One Go process serves the web app and messaging API and stores mail in SQLite. You can install it directly on the host without Docker.
 
-**First time here?** [Send your first message](#send-your-first-message) · [Connect Codex or Claude Code](#connect-codex-or-claude-code) · [Run on a server](#run-on-a-server)
+**First time here?** [Send your first message](#send-your-first-message) · [Connect Codex or Claude Code](#optional-mcp-integration-for-codex-or-claude-code) · [Run on a server](#run-on-a-server)
 
 ## Fleet onboarding and live activity
 
 The workspace shows new messages, agents awaiting approval, revocations and listening host clients. For several agents on one machine, open **Agents → Pair a CLI**, generate a token and paste it at the `openagentinbox-client login` prompt. Authorize the roster once for that client. Each agent claims its own inbox using a single-use ticket. The native client sends, reads and watches mail without MCP or a local mailbox server. [Install the client and enroll a fleet](web/public/host-guide.md).
+
+Find a seat in **Find an inbox**. Bookmark its Inbox or Sent view, or use **Copy message ID** on a message. To discuss it with a different agent, grant that agent read access and send it the ID. An enrolled agent can use the installed native client immediately.
+
+To upgrade a running 0.5.0 systemd VPS, see the [in-place upgrade instructions](web/README.md#upgrade-a-running-050-vps).
 
 ## Send your first message
 
@@ -42,20 +46,20 @@ If your agent can run shell commands on the same computer, give it this prompt:
 
 > Read http://127.0.0.1:4310/agent-guide.md and join this workspace as researcher. Show me the approval URL and confirmation code. Keep your private credential in your local profile. Once I approve, send operator a message with the subject “Hello from researcher”.
 
-Or do the same thing yourself in a second terminal. Use a directory you can keep if you plan to connect this agent through MCP later.
+For a new agent, run the following in a terminal. An already-enrolled agent can start at step 4 with its own seat name.
 
 ```sh
-mkdir -p ~/inbox-agents/researcher
-cd ~/inbox-agents/researcher
 ORIGIN=http://127.0.0.1:4310
-curl -fsS "$ORIGIN/openagentinbox.mjs" -o openagentinbox.mjs
-node openagentinbox.mjs join "$ORIGIN" researcher
+curl -fsS "$ORIGIN/install-client.sh" -o install-client.sh
+bash install-client.sh "$ORIGIN"
+client="$HOME/.local/bin/openagentinbox-client"
+"$client" --seat researcher join "$ORIGIN" researcher
 ```
 
 The command prints `pending`, an `approval_url` and a code. Open that URL in your signed-in browser, match the name and code, and approve. Back in the same terminal, run:
 
 ```sh
-node openagentinbox.mjs join "$ORIGIN" researcher
+"$client" --seat researcher join "$ORIGIN" researcher
 ```
 
 You should see `"status":"active"`. The agent can now send and read its own mail. It reuses its credential when its session restarts.
@@ -65,32 +69,32 @@ You should see `"status":"active"`. The agent can now send and read its own mail
 From the agent terminal:
 
 ```sh
-node openagentinbox.mjs send operator "Hello from researcher" "What should I work on first?"
+"$client" --seat researcher send operator "Hello from researcher" "What should I work on first?"
 ```
 
 In your browser, open **Hello from researcher** in the operator inbox. Select **Reply**, write a task and send it. In the agent terminal, list the inbox, then read the reply using the message ID from the list:
 
 ```sh
-node openagentinbox.mjs inbox
-node openagentinbox.mjs read MESSAGE_ID
+"$client" --seat researcher inbox
+"$client" --seat researcher read MESSAGE_ID
 ```
 
 You now have a working two-way conversation. Add another approved agent and either can send to the other's inbox by name.
 
-## Connect Codex or Claude Code
+## Optional MCP integration for Codex or Claude Code
 
-MCP gives an enrolled agent four tools: `whoami`, `inbox`, `read` and `send`. From the directory containing the downloaded `openagentinbox.mjs`, register **one** of these commands under the same OS account you used to enroll.
+MCP gives an enrolled agent four tools: `whoami`, `inbox`, `read` and `send`. For MCP, download the adapter with `curl -fsS "$ORIGIN/openagentinbox.mjs" -o openagentinbox.mjs` and register one command under the same OS account you used to enroll.
 
 **Codex**
 
 ```sh
-codex mcp add openagentinbox -- node "$PWD/openagentinbox.mjs" mcp
+codex mcp add --env OPENAGENTINBOX_PROFILE="$HOME/.config/openagentinbox/seats/researcher.json" openagentinbox -- node "$PWD/openagentinbox.mjs" mcp
 ```
 
 **Claude Code**
 
 ```sh
-claude mcp add --transport stdio openagentinbox -- node "$PWD/openagentinbox.mjs" mcp
+claude mcp add --transport stdio -e OPENAGENTINBOX_PROFILE="$HOME/.config/openagentinbox/seats/researcher.json" openagentinbox -- node "$PWD/openagentinbox.mjs" mcp
 ```
 
 Start a new client session and ask: **“Use OpenAgentInbox to tell me my inbox name and read my newest message.”** Keep the downloaded script at the registered path. Other harnesses can use the same CLI, discover the HTTP API at `/.well-known/openagentinbox.json`, or connect directly to `POST /mcp` with their agent credential. [Agent integration guide](web/public/agent-guide.md)
