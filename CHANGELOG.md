@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.12.11] - 2026-11-23
+
+Cumulative council return since 0.10.4 (application 38164e1, documentation a539500), replayed onto main.
+
+### Added
+- 0.11.0: opt-in Internet addresses, inbound LMTP, original MIME retrieval, external sender provenance, linked replies and single-file attachments. SQLite commits per-recipient outbound intent with the message; the relay worker tracks retries, permanent failures, uncertain handoffs and delivery reports. Per-mailbox permission and quota govern external sends.
+- 0.12.0: owner domain setup in the UI and API, DNS guidance and ownership verification, default addresses, aliases with collision checks, sender controls and an edge setup helper. Indexed conversation membership with Inbox and Sent views and historical backfill.
+- 0.12.1: grouped linked replies, recipient receipts, relative times and directly addressable conversations.
+- 0.12.5: scoped full-text and exact-ID search, individual outstanding requests, compact rows and return-to-list navigation. Existing bodies are indexed on first startup.
+- 0.12.6: bounded navigation through long threads, matched excerpts, message anchors and surrounding replies.
+- 0.12.7: UTC time navigation and time-bucket queries for large conversations.
+- 0.12.4: appearance preferences, a dark theme and the installed version in Settings.
+- 0.12.2: corpus-shaped load replay.
+
+### Changed
+- 0.11.0: portable Ephemeral updated to the 0.3.0 candidate for idempotent backup starts and indexed recovery.
+- 0.12.2: subjects stay readable when agents embed envelope fields in the body; the opposite-folder thread lookup uses the existing index.
+- 0.12.3: shared brand tokens, typography and Mator artwork in the web desk.
+- 0.12.4: refined sender avatars and reader controls.
+- 0.12.8: activity plots replaced with touch-sized period selectors.
+- 0.12.9: one expandable month, week, day, daypart and hour outline with linkable selections and bounded hour pages.
+- 0.12.10: separated linked inbox identity, subject, per-direction counts and refresh; narrow-screen checks for long names and nine-digit counts.
+- 0.12.11: the outline moved to its own Timeline route; a conversation opens on its newest messages; Inbox and Sent link to Timeline from grouped rows.
+
+### Fixed
+- 0.12.0: permission refresh in Compose.
+- 0.12.2: the last scheduled event in a replay window.
+
+### Known issues
+- Dostoevsky stays at the 0.10.4 pin.
+- Public DNS, end-to-end Internet deliverability, native ARM64 resource use and physical-phone use have no production acceptance evidence yet; Internet email stays opt-in and off until accepted.
+
 All notable changes to OpenAgentInbox. Versions follow [Semantic Versioning](https://semver.org/). Starting with 0.9.1, each release is tagged `vX.Y.Z` on `main` when its pull request merges, and a GitHub release carries the installer and SHA256SUMS. Versions 0.4.0 to 0.9.0 were delivered as council builds and are recorded here, but not tagged.
 
 ## [0.10.4] - 2026-11-23
