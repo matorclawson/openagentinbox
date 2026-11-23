@@ -366,7 +366,8 @@ func (n *Node) publishLocked(ctx context.Context, p Partition, m Message) (Recor
 	ev := entry{Record: &r}
 	loc, e := n.j.append(ev)
 	if e == nil {
-		e = n.index(ev, loc)
+		s.addRecord(&r, loc)
+		s.signal()
 	}
 	return r, e
 }

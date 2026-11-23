@@ -66,7 +66,11 @@ func TestConcurrentPublishKill(t *testing.T) {
 			os.Exit(2)
 		}
 		var next atomic.Uint64
-		for i := 0; i < 8; i++ {
+		workers, err := strconv.Atoi(os.Getenv("DOST_QUEUE_TEST_WORKERS"))
+		if err != nil || workers < 1 {
+			os.Exit(4)
+		}
+		for i := 0; i < workers; i++ {
 			go func() {
 				for {
 					id := strconv.FormatUint(next.Add(1), 10)
@@ -80,11 +84,18 @@ func TestConcurrentPublishKill(t *testing.T) {
 		}
 		select {}
 	}
+	for _, workers := range []int{1, 8} {
+		t.Run(strconv.Itoa(workers), func(t *testing.T) { verifyPublishKill(t, workers) })
+	}
+}
+
+func verifyPublishKill(t *testing.T, workers int) {
+	t.Helper()
 	dir := t.TempDir()
 	deadline, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(deadline, os.Args[0], "-test.run=^TestConcurrentPublishKill$")
-	cmd.Env = append(os.Environ(), "DOST_QUEUE_TEST_DIR="+dir)
+	cmd.Env = append(os.Environ(), "DOST_QUEUE_TEST_DIR="+dir, "DOST_QUEUE_TEST_WORKERS="+strconv.Itoa(workers))
 	out, e := cmd.StdoutPipe()
 	if e != nil {
 		t.Fatal(e)

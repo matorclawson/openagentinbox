@@ -55,7 +55,7 @@ func (n *Node) Retain(ctx context.Context, floors map[Partition]int64) error {
 			}
 		}
 	}
-	dir := filepath.Dir(n.j.file.Name())
+	dir := filepath.Dir(n.j.lock.Name())
 	f, err := os.CreateTemp(dir, ".retention-*")
 	if err != nil {
 		return err
@@ -128,7 +128,7 @@ func (n *Node) Retain(ctx context.Context, floors map[Partition]int64) error {
 	if err = ctx.Err(); err != nil {
 		return err
 	}
-	if err = os.Rename(temp, n.j.file.Name()); err != nil {
+	if err = os.Rename(temp, filepath.Join(dir, "journal.v1")); err != nil {
 		return err
 	}
 	installed = true

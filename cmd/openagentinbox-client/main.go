@@ -215,7 +215,7 @@ const usage = "openagentinbox-client [--seat NAME] whoami | authorization | onbo
 
 func run(ctx context.Context, args []string) error {
 	if len(args) == 1 && args[0] == "version" {
-		fmt.Println("0.10.3")
+		fmt.Println("0.10.4")
 		return nil
 	}
 	if len(args) == 0 || args[0] == "help" {

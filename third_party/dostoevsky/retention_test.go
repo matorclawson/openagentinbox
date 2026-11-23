@@ -100,3 +100,29 @@ func TestRetentionCancelAndEmpty(t *testing.T) {
 		t.Fatal(r)
 	}
 }
+
+func TestRepeatedRetentionWithoutReopen(t *testing.T) {
+	dir := t.TempDir()
+	n := openTest(t, dir, config())
+	for _, id := range []string{"a", "b", "c"} {
+		publish(t, n, id)
+	}
+	for _, floor := range []int64{1, 2} {
+		if err := n.Retain(ctx, map[Partition]int64{p: floor}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if r := publish(t, n, "d"); r.Offset != 3 {
+		t.Fatal(r)
+	}
+	if err := n.Close(); err != nil {
+		t.Fatal(err)
+	}
+	n = openTest(t, dir, config())
+	if _, err := n.Read(ctx, p, 1, false); err != ErrExpired {
+		t.Fatal(err)
+	}
+	if r, err := n.Read(ctx, p, 3, false); err != nil || r.ID != "d" {
+		t.Fatal(r, err)
+	}
+}

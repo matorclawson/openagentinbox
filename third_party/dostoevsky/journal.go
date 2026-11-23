@@ -35,6 +35,7 @@ type journal struct {
 	lock   *os.File
 	end    int64
 	failed error
+	frame  []byte // scratch for single appends, protected by the node lock
 }
 
 // One file descriptor owns the advisory lock for the lifetime of the node.
@@ -78,9 +79,13 @@ func (j *journal) append(e entry) (location, error) {
 	if j.failed != nil {
 		return loc, j.failed
 	}
-	frame, err := encodeFrame(e)
+	frame, err := appendEncodedFrame(j.frame[:0], e, maxFrame+20)
 	if err != nil {
 		return loc, err
+	}
+	// Avoid retaining unusually large payloads for the lifetime of the node.
+	if cap(frame) <= 16<<10 {
+		j.frame = frame[:0]
 	}
 	loc = location{j.end + 20, len(frame) - 20}
 	return loc, j.writeFrames(frame)
@@ -113,7 +118,7 @@ func (j *journal) writeFrames(frames []byte) error {
 	}
 	_, err := j.file.WriteAt(frames, j.end)
 	if err == nil {
-		err = j.file.Sync()
+		err = syncJournalData(j.file)
 	}
 	if err != nil {
 		j.failed = fmt.Errorf("journal write requires reopen: %w", err)

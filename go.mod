@@ -5,7 +5,7 @@ go 1.27.0
 require (
 	ephemeral v0.2.1
 	github.com/google/uuid v1.6.0
-	github.com/rodriveracom/dostoevsky v0.3.0-rc.2
+	github.com/rodriveracom/dostoevsky v0.3.0-rc.3
 	golang.org/x/crypto v0.50.0
 	modernc.org/sqlite v1.57.0
 )
@@ -21,6 +21,6 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 )
 
-replace github.com/rodriveracom/dostoevsky v0.3.0-rc.2 => ./third_party/dostoevsky
+replace github.com/rodriveracom/dostoevsky v0.3.0-rc.3 => ./third_party/dostoevsky
 
 replace ephemeral v0.2.1 => ./third_party/ephemeral
