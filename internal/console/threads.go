@@ -147,13 +147,17 @@ func (s *server) threads(_ http.ResponseWriter, r *http.Request) (any, error) {
 			return nil, failure{400, "Invalid cursor"}
 		}
 	}
-	const fields = "m.seq,m.id,m.sender,CASE WHEN m.sender=? THEN coalesce((SELECT group_concat(seat,', ') FROM deliveries WHERE seq=m.seq),'') ELSE ? END,m.subject,m.created_text,coalesce(d.accepted_at,0),coalesce(r.opened,0),coalesce(r.replied,0),"
+	previewField := "''"
+	if strings.HasPrefix(r.URL.Path, "/api/desk/") || q.Get("preview") == "1" {
+		previewField = "substr(m.display_body,1,768)"
+	}
+	fields := previewField + ",m.seq,m.id,m.sender,CASE WHEN m.sender=? THEN coalesce((SELECT group_concat(seat,', ') FROM deliveries WHERE seq=m.seq),'') ELSE ? END,m.subject,m.created_text,coalesce(d.accepted_at,0),coalesce(r.opened,0),coalesce(r.replied,0),"
 	// Each page reads only the latest envelope and its recipient-scoped receipt.
 	// For a fan-out send there is no single recipient whose open represents the group.
 	const receipt = ` LEFT JOIN deliveries d ON d.seq=m.seq AND d.seat=CASE WHEN m.sender=? THEN
  (SELECT min(seat) FROM deliveries WHERE seq=m.seq HAVING count(*)=1) ELSE ? END
  LEFT JOIN mail_receipts r ON r.id=m.id AND r.seat=d.seat `
-	query := "SELECT " + fields + `h.root,h.n,EXISTS(SELECT 1 FROM thread_heads other WHERE other.box=h.box AND other.root=h.root AND other.folder<>h.folder AND (other.latest<>h.latest OR other.n>1))
+	query := "SELECT " + fields + `h.root,h.n,EXISTS(SELECT 1 FROM thread_heads other WHERE other.box=h.box AND other.root=h.root AND other.folder=CASE h.folder WHEN 'sent' THEN 'inbox' ELSE 'sent' END AND (other.latest<>h.latest OR other.n>1))
  FROM thread_heads h JOIN messages m ON m.seq=h.latest` + receipt + "WHERE h.box=? AND h.folder=? AND h.latest<? ORDER BY h.latest DESC LIMIT 41"
 	args := []any{box, box, box, box, box, folder, before}
 	if root := r.PathValue("root"); root != "" {
@@ -173,14 +177,18 @@ func (s *server) threads(_ http.ResponseWriter, r *http.Request) (any, error) {
 			next = strconv.FormatInt(last, 10)
 			break
 		}
-		var id, src, dst, sub, at, root string
+		var preview, id, src, dst, sub, at, root string
 		var n int
 		var received, opened, replied int64
 		var other bool
-		if e = rows.Scan(&last, &id, &src, &dst, &sub, &at, &received, &opened, &replied, &root, &n, &other); e != nil {
+		if e = rows.Scan(&preview, &last, &id, &src, &dst, &sub, &at, &received, &opened, &replied, &root, &n, &other); e != nil {
 			return nil, e
 		}
-		result = append(result, object{"id": id, "src": src, "dst": dst, "subject": sub, "at": at, "thread": root, "count": n, "conversation": n > 1 || other, "received": received, "opened": opened, "replied": replied})
+		row := object{"id": id, "src": src, "dst": dst, "subject": sub, "at": at, "thread": root, "count": n, "conversation": n > 1 || other, "received": received, "opened": opened, "replied": replied}
+		if preview != "" {
+			row["display"] = preview
+		}
+		result = append(result, row)
 	}
 	return object{"rows": result, "next": next}, rows.Err()
 }

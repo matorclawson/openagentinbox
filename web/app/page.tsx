@@ -15,7 +15,8 @@ import {
   ArrowRight,
   Plus,
 } from "lucide-react";
-import {Avatar, Receipt, MailTime, MailList, useMailClock, type Envelope} from "./mail-ui";
+import {BodyText, mailTitle, Avatar, Receipt, MailTime, MailList, useMailClock, type Envelope} from "./mail-ui";
+import {Orbit} from "./orbit";
 import {MailSetup} from "./mail-setup";
 import { Workspace, EnrollmentQueue, useWorkspace } from "./live";
 type Session = {
@@ -26,7 +27,7 @@ type Session = {
 };
 type Accounts = { operator: string; agents: string[]; email_domain?: string;operator_email_send?: boolean };
 type Row = Envelope & {
- thread?:string; count?:number;
+ thread?:string; count?:number; audience?:string[];
   id: string;
   src: string;
   dst: string;
@@ -49,7 +50,7 @@ async function api(path: string, body?: object) {
 function Brand() {
   return (
     <div className="brand">
-      <Inbox size={25} />
+      <Orbit size={32}/>
       <span>Open</span>AgentInbox
     </div>
   );
@@ -240,7 +241,7 @@ export default function Home() {
     if (!messageId || !live?.cursor || !s?.name) return;
     let active=true;
     void api("desk/receipt/"+messageId).then(receipt=>{
-      if(active)select(old=>old && encodeURIComponent(old.row.id)===messageId?{...old,row:{...old.row,...receipt,email_status:receipt.email?.state??old.row.email_status}}:old);
+      if(active)select(old=>old && !old.row.audience && encodeURIComponent(old.row.id)===messageId?{...old,row:{...old.row,...receipt,email_status:receipt.email?.state??old.row.email_status}}:old);
     }).catch(()=>{});
     return ()=>{active=false};
   },[live?.cursor,messageId,s?.name]);
@@ -461,11 +462,11 @@ export default function Home() {
                 Back
               </button>
               <article className="card detail reader">
-                <div className="reader-kicker"><Mail size={16}/>Message</div>
-                <h1>{selected.row.subject||"(No subject)"}</h1>
-                <div className="byline"><Avatar name={selected.row.src}/><div><b>{selected.row.src.replace(/^external:/,"")}</b><small>To {selected.row.dst}</small></div><MailTime value={selected.row.at} now={now} label="Sent"/></div>
+                <div className="reader-kicker"><Orbit size={23}/>Correspondence</div>
+                <h1>{mailTitle(selected.row,selected.body)}</h1>
+                <div className="byline"><Avatar name={selected.row.src}/><div><b>{selected.row.src.replace(/^external:/,"")}</b><small>To {selected.row.dst}</small>{selected.row.audience && <details><summary>All {selected.row.audience.length} recipients</summary><ul>{selected.row.audience.map(name=><li key={name}>{name}</li>)}</ul></details>}</div><MailTime value={selected.row.at} now={now} label="Sent"/></div>
                 {selected.row.trust==="external" && <p>Internet email · Sender supplied by the email header.</p>}
-                <pre className="letter-body">{selected.body}</pre>
+                <BodyText body={selected.body} external={selected.row.trust==="external"}/>
                 <div className="reader-actions">                {selected.row.src !== acc.operator && (
                   <button className="primary reply-action"
                     onClick={() =>
@@ -476,7 +477,7 @@ export default function Home() {
                     Reply
                   </button>
                 )}
-<Receipt row={selected.row}/>{selected.row.thread && <a onClick={follow} href={"/inboxes/"+encodeURIComponent(readerBox)+"/threads/"+encodeURIComponent(selected.row.thread)}><MessageSquare size={15}/>View conversation</a>}</div>
+<Receipt row={selected.row.audience?{...selected.row,dst:selected.row.audience.join(", ")}:selected.row}/>{selected.row.thread && <a onClick={follow} href={"/inboxes/"+encodeURIComponent(readerBox)+"/threads/"+encodeURIComponent(selected.row.thread)}><MessageSquare size={15}/>View conversation</a>}</div>
                 {selected.row.original_available && <button onClick={()=>void task(async()=>{
                   const data=await api("desk/email-original/"+selected.row.id);
                   const blob=new Blob([Uint8Array.from(atob(data.base64),c=>c.charCodeAt(0))],{type:"application/octet-stream"});
@@ -651,7 +652,7 @@ export default function Home() {
                   Create agent
                 </button>
                 {credential && (
-                  <label>
+                  <label className="issued-credential">
                     Copy this token to your harness now
                     <input
                       readOnly
@@ -699,8 +700,8 @@ export default function Home() {
           ) : (
             <>
               <div className="mail-heading">
-                <div className="mail-emblem">{threadId?<Layers/>:folder==="sent"?<Send/>:<Inbox/>}</div>
-                <div><h1>{threadId?(rows[0]?.subject||"Conversation"):folder==="sent"?"Sent":"Inbox"}</h1><p>{threadId?"Conversation · ":""}{box}</p></div>
+                <img className="orbit-illustration" src="/mail-orbit.svg" alt="" width="320" height="166"/>
+                <div><h1>{threadId?(rows[0]?mailTitle(rows[0]):"Conversation"):folder==="sent"?"Sent":"Inbox"}</h1><p>{threadId?"Conversation · ":""}{box}</p></div>
                 <button aria-label="Refresh messages" disabled={busy} onClick={()=>void task(()=>load())}><RefreshCw size={16}/></button>
               </div>
               <div className="mail-panel">

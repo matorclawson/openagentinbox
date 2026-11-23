@@ -41,7 +41,8 @@ func (h *hist) summary() latency {
 }
 
 type result struct {
-	StoredByInbox map[string]int
+	CorpusRows, CorpusDeliveries int `json:",omitempty"`
+	StoredByInbox                map[string]int
 
 	IdleSamples                                                                    []sample `json:",omitempty"`
 	Config                                                                         config
@@ -139,6 +140,11 @@ func (b *bench) accounts() error {
 func (b *bench) route(i int) (int, int) {
 	src := i % b.Seats
 	dst := (src + 1 + (i/b.Seats)%(b.Seats-1)) % b.Seats
+	if len(b.shapes) > 0 {
+		sh := b.liveShape(i)
+		src = sh.src
+		dst = sh.dst[i%len(sh.dst)]
+	}
 	if b.Scenario == "hot" {
 		src = 1 + i%(b.Seats-1)
 		dst = 0
@@ -148,6 +154,7 @@ func (b *bench) route(i int) (int, int) {
 func key(i int) string { return fmt.Sprintf("00000000-0000-4000-8000-%012x", i) }
 func (b *bench) work(i int, scheduled, end time.Time, body string, m *metrics) error {
 	src, dst := b.route(i)
+	body = b.liveBody(i, body)
 	subject := fmt.Sprintf("load-%d", i)
 	payload := map[string]string{"to": name(dst), "key": key(i), "subject": subject, "body": body}
 	if b.Scenario == "requests" {
@@ -215,7 +222,11 @@ func (b *bench) work(i int, scheduled, end time.Time, body string, m *metrics) e
 	if i%4 == 0 {
 		var page struct{ Rows []struct{ ID string } }
 		start = time.Now()
-		if e := b.api(b.keys[dst], "/api/agent/inbox", nil, &page); e != nil {
+		listPath := "/api/agent/inbox"
+		if len(b.shapes) > 0 {
+			listPath = "/api/agent/threads?folder=inbox&preview=1"
+		}
+		if e := b.api(b.keys[dst], listPath, nil, &page); e != nil {
 			return fmt.Errorf("list: %w", e)
 		}
 		if len(page.Rows) == 0 || len(page.Rows) > 40 {
@@ -244,7 +255,7 @@ func (b *bench) backup() (s snapshot, e error) {
 	if e = json.Unmarshal(raw, &s); e != nil {
 		return s, e
 	}
-	if s.Messages < int64(b.History) || s.Messages != s.Deliveries || s.Bytes < 1 {
+	if s.Messages < int64(b.History) || s.Deliveries-s.Messages != int64(b.historyDeliveries-b.History) || s.Bytes < 1 {
 		return s, errors.New("inconsistent snapshot manifest")
 	}
 	return s, nil
@@ -266,10 +277,10 @@ func (b *bench) verify(n int, body string, accepted fingerprint, byInbox map[str
 	if e = db.QueryRow("SELECT (SELECT count(*) FROM messages),(SELECT count(*) FROM deliveries),(SELECT count(*) FROM operations)").Scan(&total, &del, &ops); e != nil {
 		return e
 	}
-	if total != b.History+n || del != total || ops != n {
+	if total != b.History+n || del != b.historyDeliveries+n || ops != n {
 		return fmt.Errorf("durability mismatch: messages=%d deliveries=%d operations=%d expected new=%d", total, del, ops, n)
 	}
-	rows, e := db.Query(`SELECT m.id,m.subject,m.sender,d.seat,o.op_key FROM operations o JOIN messages m ON m.id=o.message_id JOIN deliveries d USING(seq) WHERE m.body=CAST(? AS BLOB)`, body)
+	rows, e := db.Query(`SELECT m.id,m.subject,m.sender,d.seat,o.op_key,m.body FROM operations o JOIN messages m ON m.id=o.message_id JOIN deliveries d USING(seq)`)
 	if e != nil {
 		return e
 	}
@@ -277,13 +288,16 @@ func (b *bench) verify(n int, body string, accepted fingerprint, byInbox map[str
 	var stored fingerprint
 	checked := 0
 	for rows.Next() {
-		var id, sub, src, dst, op string
+		var id, sub, src, dst, op, persistedBody string
 		var i int
-		if e = rows.Scan(&id, &sub, &src, &dst, &op); e != nil {
+		if e = rows.Scan(&id, &sub, &src, &dst, &op, &persistedBody); e != nil {
 			return e
 		}
 		if _, e = fmt.Sscanf(sub, "load-%d", &i); e != nil {
 			return e
+		}
+		if i < 0 || persistedBody != b.liveBody(i, body) {
+			return errors.New("stored payload mismatch")
 		}
 		a, z := b.route(i)
 		if i < 0 || src != name(a) || dst != name(z) || op != "console/"+src+"/"+key(i) {
@@ -320,6 +334,10 @@ func offset(i, rate int, burst bool) time.Duration {
 	return steady/cycle*cycle + (steady%cycle)/5
 }
 func (b *bench) load() (r result, err error) {
+	if len(b.shapes) > 0 {
+		r.CorpusRows = len(b.shapes)
+		r.CorpusDeliveries = b.historyDeliveries
+	}
 	ticks, e := clockTicks()
 	if e != nil {
 		return r, e
@@ -369,7 +387,11 @@ func (b *bench) load() (r result, err error) {
 			snapDone <- backupResult{s, e}
 		}()
 	}
-	jobs := make(chan job, b.Workers)
+	queue := b.Queue
+	if queue == 0 {
+		queue = b.Workers
+	}
+	jobs := make(chan job, queue)
 	var wg sync.WaitGroup
 	for k := 0; k < b.Workers; k++ {
 		wg.Add(1)
@@ -399,7 +421,17 @@ func (b *bench) load() (r result, err error) {
 		}()
 	}
 	for i := 0; i < n; i++ {
-		due := start.Add(offset(i, b.Rate, b.Scenario == "burst"))
+		delay := offset(i, b.Rate, b.Scenario == "burst")
+		if b.Scenario == "trace" {
+			// Normalize each complete capture to its target-rate duration.
+			// Entire cycles repeat in source order. Partial windows use a prefix.
+			count := len(b.shapes)
+			cycle := offset(count, b.Rate, false)
+			span := b.shapes[count-1].at.Sub(b.shapes[0].at)
+			fraction := float64(b.shapes[i%count].at.Sub(b.shapes[0].at)) / float64(span)
+			delay = time.Duration(i/count)*cycle + time.Duration(fraction*float64(cycle))
+		}
+		due := start.Add(delay)
 		time.Sleep(time.Until(due))
 		if time.Now().After(end) {
 			r.Dropped += n - i
@@ -477,6 +509,7 @@ func (b *bench) load() (r result, err error) {
 			return r, e
 		}
 		r.RestartMS = float64(time.Since(t)) / 1e6
+		body = b.liveBody(0, body)
 		src, dst := b.route(0)
 		var persisted struct{ ID string }
 		// A replay after restart must resolve the original operation. The final

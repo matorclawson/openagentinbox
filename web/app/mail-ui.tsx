@@ -1,9 +1,10 @@
 import { Fragment, useEffect, useRef, useState } from "react";
+import {splitMail} from "./mail-text";
 import { MessagesSquare, CheckCheck, MailOpen, Mail, Send } from "lucide-react";
 
 export type Envelope = {
   id:string; src:string; dst:string; subject:string; at:string; thread?:string;
-  count?:number; conversation?:boolean; received?:number; opened?:number; replied?:number;
+  display?:string; count?:number; conversation?:boolean; received?:number; opened?:number; replied?:number;
 };
 export function useMailClock() {
   const [now, setNow] = useState(() => Date.now());
@@ -43,6 +44,16 @@ export function Receipt({row}:{row:Envelope}) {
   const Icon = state==="Replied"?CheckCheck:state==="Opened"?MailOpen:state==="Sent"?Send:Mail;
   return <span className={"mail-status status-"+state.toLowerCase()} title={state+" · latest message"}><Icon size={13}/>{state}</span>;
 }
+export function mailTitle(row:Envelope,text=row.display??"") {
+  const mail=splitMail(text);
+  return row.subject.trim()||mail.subject||mail.lead||"(No subject)";
+}
+export function BodyText({body,external=false}:{body:string;external?:boolean}) {
+  const mail=splitMail(body);
+  if (external||!mail.headers||!mail.body.trim()) return <pre className="letter-body">{body}</pre>;
+  return <><pre className="letter-body">{mail.body}</pre><details className="envelope-fields">
+    <summary>Message headers</summary><pre>{mail.headers.trimEnd()}</pre></details></>;
+}
 export function MailList({rows,box,sent,timeline,now,follow}:{rows:Envelope[];box:string;sent:boolean;timeline:boolean;now:number;follow:React.MouseEventHandler<HTMLAnchorElement>}) {
   const [expanded,setExpanded] = useState<{id:string;body?:string;error?:string}|null>(null);
   const request = useRef(0);
@@ -68,16 +79,21 @@ export function MailList({rows,box,sent,timeline,now,follow}:{rows:Envelope[];bo
     previous=group;
     const grouped = !timeline && row.conversation;
     const href = grouped ? "/inboxes/"+encodeURIComponent(box)+"/threads/"+encodeURIComponent(row.thread||row.id) : "/messages/"+encodeURIComponent(row.id);
+    const parsed=splitMail(row.display??"");
+    const title=mailTitle(row);
+    const recipients=outgoing?who.split(", "):[who];
+    const snippet=parsed.lead && parsed.lead!==title ? parsed.lead : "";
     const content = <>
         <Avatar name={who}/>
-        <div className="post-main"><span className="correspondent">{outgoing?"To ":""}{who.replace(/^external:/,"")}</span>
-        <strong>{row.subject||"(No subject)"}</strong>
+        <div className="post-main"><span className="correspondent">{outgoing?"To ":""}{recipients[0].replace(/^external:/,"")}{recipients.length>1 && <span className="more-recipients" title={who}> +{recipients.length-1} more</span>}</span>
+        <strong>{parsed.priority==="p0" && <span className="urgent-mail">P0</span>}{title}</strong>
+        {snippet && <span className="mail-snippet">{snippet}</span>}
         {grouped && <span className="conversation-cue"><MessagesSquare size={13}/>Conversation{(row.count??0)>1?" · "+row.count+" in "+(sent?"Sent":"Inbox"):""}</span>}</div>
         <div className="post-meta"><MailTime value={stamp} now={now} label={outgoing?"Sent":"Received"}/><Receipt row={row}/></div>
       </>;
     return <Fragment key={row.id}>{showDay && <h2 className="post-day">{group}</h2>}
       {timeline ? <><button className="post-row" aria-expanded={expanded?.id===row.id} onClick={()=>void expand(row.id)}>{content}</button>
-      {expanded?.id===row.id && <div className="thread-body"><pre>{expanded.body??expanded.error??"Opening message…"}</pre><a href={href} onClick={follow}>Open message page →</a></div>}</>
+      {expanded?.id===row.id && <div className="thread-body">{expanded.body!==undefined?<BodyText body={expanded.body} external={row.src.startsWith("external:")}/>:<p>{expanded.error??"Opening message…"}</p>}<a href={href} onClick={follow}>Open message page →</a></div>}</>
       : <a className="post-row" href={href} onClick={follow}>{content}</a>}</Fragment>;
   })}</div>;
 }
