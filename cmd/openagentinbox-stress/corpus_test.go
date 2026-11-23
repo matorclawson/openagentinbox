@@ -23,6 +23,9 @@ func TestCorpusHistoryAndReplay(t *testing.T) {
 	if err := b.readCorpus(); err != nil {
 		t.Fatal(err)
 	}
+	if b.traceOffset(0) != 0 || b.traceOffset(1) != 30*time.Second || b.traceOffset(2) != time.Minute {
+		t.Fatal("trace endpoints overlap the next cycle")
+	}
 	if b.History != 2 || b.historyDeliveries != 3 || b.shapes[1].parent != 0 || b.shapes[1].priority != 0 {
 		t.Fatal("history shape mismatch")
 	}

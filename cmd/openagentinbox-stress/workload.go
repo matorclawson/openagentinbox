@@ -423,13 +423,7 @@ func (b *bench) load() (r result, err error) {
 	for i := 0; i < n; i++ {
 		delay := offset(i, b.Rate, b.Scenario == "burst")
 		if b.Scenario == "trace" {
-			// Normalize each complete capture to its target-rate duration.
-			// Entire cycles repeat in source order. Partial windows use a prefix.
-			count := len(b.shapes)
-			cycle := offset(count, b.Rate, false)
-			span := b.shapes[count-1].at.Sub(b.shapes[0].at)
-			fraction := float64(b.shapes[i%count].at.Sub(b.shapes[0].at)) / float64(span)
-			delay = time.Duration(i/count)*cycle + time.Duration(fraction*float64(cycle))
+			delay = b.traceOffset(i)
 		}
 		due := start.Add(delay)
 		time.Sleep(time.Until(due))

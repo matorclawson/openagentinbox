@@ -150,3 +150,12 @@ func (b *bench) liveBody(i int, fallback string) string {
 	}
 	return strings.Repeat("x", b.liveShape(i).size)
 }
+
+// Place the final event in the last offered slot of this half-open window.
+// An event at exactly end would always be dropped by the window deadline.
+func (b *bench) traceOffset(i int) time.Duration {
+	count := len(b.shapes)
+	span := b.shapes[count-1].at.Sub(b.shapes[0].at)
+	fraction := float64(b.shapes[i%count].at.Sub(b.shapes[0].at)) / float64(span)
+	return time.Duration(i/count)*offset(count, b.Rate, false) + time.Duration(fraction*float64(offset(count-1, b.Rate, false)))
+}
