@@ -124,3 +124,8 @@ html[data-palette=light]{color-scheme:light}
 .conversation-counts dt{display:flex;align-items:center;gap:4px;color:var(--muted);font:500 .8rem/1.4 var(--display)}
 .conversation-counts dd{margin:1px 0 0;font:600 1.2rem/1.25 var(--display);font-variant-numeric:tabular-nums;color:var(--ink);white-space:nowrap}
 @media(max-width:740px){.shell .desk>header.conversation-chrome{padding:4px 14px}.conversation-heading{gap:6px}.conversation-counts{display:flex;column-gap:16px}.conversation-counts>div,.conversation-counts>div+div{border:0;padding:0}}
+
+.conversation-overview{display:flex;align-items:center;justify-content:space-between;gap:8px 20px;flex-wrap:wrap}
+.conversation-overview .screen-link{display:inline-flex;align-items:center;min-height:48px;gap:7px;color:var(--teal);font:600 .9rem var(--display);text-underline-offset:3px}
+.thread-entry{display:grid;grid-template-columns:minmax(0,1fr) 48px;border-bottom:1px solid var(--line)}
+.thread-entry .post-row{border-bottom:0}.entry-timeline{display:grid;place-items:center;min-height:48px;color:var(--muted)}.entry-timeline:hover,.entry-timeline:focus-visible{color:var(--ink);background:var(--color-card)}

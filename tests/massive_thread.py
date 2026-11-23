@@ -30,7 +30,8 @@ def check_thread(page,url,root,tokens):
     api=url+"/api/desk/threads/"+root_id+"?box=architect"
     page.goto(url+route)
     page.get_by_role("heading",name="Delivery planning").wait_for()
-    page.locator(".outline-messages .post-row").first.wait_for()
+    page.locator(".timeline .post-row").first.wait_for()
+    assert page.locator(".time-outline").count()==0
     assert 0<page.locator(".timeline .post-row").count()<=40
     assert page.locator(".conversation-counts dt").all_inner_texts()==["Received","Sent"]
     assert page.locator(".conversation-counts dd").all_inner_texts()==["5,000","5,000"]
@@ -61,7 +62,7 @@ def check_thread(page,url,root,tokens):
         if "title" in data:data.update(title=long_title,inbox_count=123456789,sent_count=98765432)
         intercept.fulfill(response=response,json=data)
     page.route("**/api/desk/threads/**",header_fixture)
-    page.goto(url+route.replace("/architect/","/"+long_box+"/")+"?period=all")
+    page.goto(url+route.replace("/architect/","/"+long_box+"/"))
     page.get_by_role("heading",name=long_title,exact=True).wait_for()
     for width in (320,390,768,1440):
         page.set_viewport_size({"width":width,"height":844})
@@ -78,7 +79,18 @@ def check_thread(page,url,root,tokens):
         }""")
         if width==320:shot("header-stress-320")
     page.unroute("**/api/desk/threads/**",header_fixture)
-    page.goto(url+route);selected("hour").wait_for()
+    page.goto(url+"/inboxes/architect")
+    page.locator(f'a.entry-timeline[href="{route}/timeline"]').click()
+    selected("hour").wait_for()
+    page.reload();selected("hour").wait_for()
+    page.get_by_role("link",name="Back to conversation").click()
+    page.get_by_role("link",name="Timeline",exact=True).click()
+    selected("hour").wait_for()
+    assert "/timeline?period=hour" in page.url
+    page.get_by_role("link",name="Back to conversation").click()
+    page.locator(".timeline .post-row").first.wait_for()
+    assert page.url==url+route and not page.locator(".time-outline").count()
+    page.go_back();selected("hour").wait_for()
     page.set_viewport_size({"width":390,"height":844})
     selected("month").tap()
     page.wait_for_function("location.search.includes('period=all')")
@@ -130,6 +142,7 @@ def check_thread(page,url,root,tokens):
     page.set_viewport_size({"width":1440,"height":910})
     shot("outline-desktop")
     print("PASS month/week/day/daypart/hour expansion, subtree collapse, browser Back, deep links, bounded hour paging, touch targets and aggregate isolation.")
+    page.get_by_role("link",name="Back to conversation").click()
     search=page.get_by_label("Search this conversation")
     search.fill("heliotrope");search.press("Enter")
     page.get_by_text("heliotrope",exact=True).first.wait_for()

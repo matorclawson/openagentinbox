@@ -143,7 +143,7 @@ export default function Home() {
   const start=params.get("start")??"";
   const [revision,setRevision]=useState(0);
   function chooseTime(period:Level,time:number,replace=false){
-    navigate(pathname+"?period="+period+(period==="all"?"":"&start="+time),replace)
+    navigate(timelinePath+"?period="+period+(period==="all"?"":"&start="+time),replace)
   }
   const after=params.get("after")??"", anchor=params.get("atSeq")??"";
   const [threadInfo,setThreadInfo]=useState({key:"",newer:"",title:"",received:0,sent:0});
@@ -153,13 +153,15 @@ export default function Home() {
     if(pending)params.set("view","requests");
     if(page)params.set(direction,page);
     if(zoom && !query && page && (direction==="before"||direction==="after")){if(level)params.set("period",level);else params.set("zoom",zoom);params.set("start",start)}
-    navigate(pathname+(params.size?"?"+params:""));
+    navigate((isOutline && query?conversationPath:pathname)+(params.size?"?"+params:""));
   }
   const parts = pathname.split("/");
   const box = parts[1] === "inboxes" ? parts[2] : acc?.operator ?? "operator";
   const threadId=parts[3]==="threads"?parts[4]:"";
  const folder = parts[1]==="settings"?"settings":parts[1]==="mail-setup"?"mail-setup":parts[1] === "activity" ? "activity" : parts[1] === "compose" ? "compose" : parts[1] === "agents" ? "agents" : parts[3] === "sent" ? "sent" : "inbox";
-  const isOutline=!!threadId&&!term&&!anchor&&!number&&!params.has("zoom")&&(!!level||(!before&&!after));
+  const conversationPath=parts.slice(0,5).join("/");
+  const timelinePath=conversationPath+"/timeline";
+  const isOutline=(parts[5]==="timeline"||!!level)&&!!threadId&&!term&&!anchor&&!number&&!params.has("zoom")&&(!!level||(!before&&!after));
   const messageId = parts[1] === "messages" ? parts[2] : "";
   const     [rows, list] = useState<Row[]>([]),
     [cursor, next] = useState<string | null>(null);
@@ -767,19 +769,20 @@ export default function Home() {
           ) : (
             <>
               {threadId?<section className="conversation-heading" aria-labelledby="conversation-subject">
-                <p className="conversation-kind">Conversation</p>
+                <p className="conversation-kind">{isOutline?"Timeline":"Conversation"}</p>
                 <h1 id="conversation-subject">{currentThread?title:busy?"Loading conversation…":"Conversation"}</h1>
-                {currentThread && <dl className="conversation-counts" aria-label="Messages in this conversation">
+                <div className="conversation-overview">{!isOutline && currentThread && <dl className="conversation-counts" aria-label="Messages in this conversation">
                   <div><dt><ArrowDownLeft size={15} aria-hidden="true"/>Received</dt><dd>{currentThread.received.toLocaleString()}</dd></div>
                   <div><dt><ArrowUpRight size={15} aria-hidden="true"/>Sent</dt><dd>{currentThread.sent.toLocaleString()}</dd></div>
                 </dl>}
+                <a className="screen-link" href={isOutline?conversationPath:timelinePath} onClick={follow}>{isOutline?<ArrowLeft size={16}/>:<Layers size={16}/>} {isOutline?"Back to conversation":"Timeline"}</a></div>
               </section>:<div className="mail-heading">
                 <div><h1>{folder==="sent"?"Sent":"Inbox"}</h1><p>{box}</p></div>
                 <button aria-label="Refresh messages" disabled={busy} onClick={refreshMail}><RefreshCw size={16}/></button>
               </div>}
               <div className="mail-panel">
-                <MailTools thread={!!threadId} query={term} requests={requests} sent={folder==="sent"} compact={compact} toggle={toggleDensity} apply={browse}/>
-                {isOutline?<ThreadTime key={box+"/"+threadId} api={"/api/desk/threads/"+threadId+"?box="+encodeURIComponent(box)} level={level} at={level?Number(start):0} choose={chooseTime} revision={revision}>{mailRows()}</ThreadTime>:<>{threadId && <button onClick={()=>chooseTime("all",0)}>Conversation timeline</button>}{mailRows()}</>}
+                {!isOutline && <MailTools thread={!!threadId} query={term} requests={requests} sent={folder==="sent"} compact={compact} toggle={toggleDensity} apply={browse}/>}
+                {isOutline?<ThreadTime key={box+"/"+threadId} api={"/api/desk/threads/"+threadId+"?box="+encodeURIComponent(box)} level={level} at={level?Number(start):0} choose={chooseTime} revision={revision}>{mailRows()}</ThreadTime>:mailRows()}
                 {!threadId && before && <button onClick={()=>browse(term,requests)}>Back to newest</button>}
                 {!threadId && cursor && (
                   <button

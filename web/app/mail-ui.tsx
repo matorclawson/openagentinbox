@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import {splitMail} from "./mail-text";
-import { MessagesSquare, CheckCheck, MailOpen, Mail, Send } from "lucide-react";
+import { History, MessagesSquare, CheckCheck, MailOpen, Mail, Send } from "lucide-react";
 
 export type Envelope = {
   id:string; src:string; dst:string; subject:string; at:string; thread?:string;
@@ -108,10 +108,11 @@ export function MailList({rows,box,sent,timeline,query,anchor,now,follow}:{query
         {grouped && <span className="conversation-cue"><MessagesSquare size={13}/>Conversation{(row.count??0)>1?" · "+row.count+" in "+(sent?"Sent":"Inbox"):""}</span>}</div>
         <div className="post-meta">{row.sent_ms!==undefined?<time dateTime={new Date(row.sent_ms).toISOString()} title={new Date(row.sent_ms).toISOString()}>{new Date(row.sent_ms).toISOString().slice(11,16)} UTC</time>:<MailTime value={stamp} now={now} label={outgoing?"Sent":"Received"}/>}{row.due && !row.replied ? <span className={"request-due"+(row.due<now?" overdue":"")} title={new Date(row.due).toLocaleString()}>{row.due<now?"Overdue":"Reply due"} · {new Intl.DateTimeFormat(undefined,{hour:"numeric",minute:"2-digit",...(day(row.due,now)==="Today"?{}:{month:"short",day:"numeric"})}).format(row.due)}</span> : <Receipt row={row}/>}</div>
       </>;
+    const messageLink=<a id={"row-"+row.id} data-message={row.id} className="post-row" href={href} onClick={follow}>{content}</a>;
     return <Fragment key={row.id}>{showDay && <h2 className="post-day">{group}</h2>}
       {timeline ? <><button className={"post-row"+(row.position===anchor?" anchored":"")} aria-expanded={expanded?.id===row.id} onClick={()=>void expand(row.id)}>{content}</button>
       {expanded?.id===row.id && <div className="thread-body">{expanded.body!==undefined?<BodyText body={expanded.body} external={row.src.startsWith("external:")}/>:<p>{expanded.error??"Opening message…"}</p>}<a href={href} onClick={follow}>Open message page →</a></div>}</>
-      : <a id={"row-"+row.id} data-message={row.id} className="post-row" href={href} onClick={follow}>{content}</a>}
+      : grouped ? <div className="thread-entry">{messageLink}<a className="entry-timeline" href={href+"/timeline"} onClick={follow} aria-label={"Timeline for "+title} title={"Timeline for "+title}><History size={17} aria-hidden="true"/></a></div> : messageLink}
       {query && row.position && row.thread && (timeline||row.thread!==row.id) && <a className="context-link" href={"/inboxes/"+encodeURIComponent(box)+"/threads/"+encodeURIComponent(row.thread)+"?atSeq="+row.position} onClick={follow}>View surrounding replies →</a>}</Fragment>;
   })}</div>;
 }
