@@ -4,7 +4,7 @@ import { MessagesSquare, CheckCheck, MailOpen, Mail, Send } from "lucide-react";
 
 export type Envelope = {
   id:string; src:string; dst:string; subject:string; at:string; thread?:string;
-  excerpt?:string; thread_title?:string; position?:string; due?:number; display?:string; count?:number; conversation?:boolean; received?:number; opened?:number; replied?:number;
+  sent_ms?:number; excerpt?:string; thread_title?:string; position?:string; due?:number; display?:string; count?:number; conversation?:boolean; received?:number; opened?:number; replied?:number;
 };
 export function useMailClock() {
   const [now, setNow] = useState(() => Date.now());
@@ -90,7 +90,7 @@ export function MailList({rows,box,sent,timeline,query,anchor,now,follow}:{query
     const outgoing = timeline ? row.src===box : sent;
     const who = outgoing ? row.dst : row.src;
     const stamp = (!outgoing && row.received) || row.at;
-    const group = day(stamp,now), showDay = group!==previous;
+    const group = row.sent_ms!==undefined ? new Intl.DateTimeFormat(undefined,{timeZone:"UTC",dateStyle:"long"}).format(row.sent_ms)+" UTC" : day(stamp,now), showDay = group!==previous;
     previous=group;
     const grouped = !timeline && row.conversation;
     const href = grouped ? "/inboxes/"+encodeURIComponent(box)+"/threads/"+encodeURIComponent(row.thread||row.id) : "/messages/"+encodeURIComponent(row.id);
@@ -106,7 +106,7 @@ export function MailList({rows,box,sent,timeline,query,anchor,now,follow}:{query
         {query && row.excerpt && <MatchExcerpt text={row.excerpt}/>}
         {!query && snippet && <span className="mail-snippet">{snippet}</span>}
         {grouped && <span className="conversation-cue"><MessagesSquare size={13}/>Conversation{(row.count??0)>1?" · "+row.count+" in "+(sent?"Sent":"Inbox"):""}</span>}</div>
-        <div className="post-meta"><MailTime value={stamp} now={now} label={outgoing?"Sent":"Received"}/>{row.due && !row.replied ? <span className={"request-due"+(row.due<now?" overdue":"")} title={new Date(row.due).toLocaleString()}>{row.due<now?"Overdue":"Reply due"} · {new Intl.DateTimeFormat(undefined,{hour:"numeric",minute:"2-digit",...(day(row.due,now)==="Today"?{}:{month:"short",day:"numeric"})}).format(row.due)}</span> : <Receipt row={row}/>}</div>
+        <div className="post-meta">{row.sent_ms!==undefined?<time dateTime={new Date(row.sent_ms).toISOString()} title={new Date(row.sent_ms).toISOString()}>{new Date(row.sent_ms).toISOString().slice(11,16)} UTC</time>:<MailTime value={stamp} now={now} label={outgoing?"Sent":"Received"}/>}{row.due && !row.replied ? <span className={"request-due"+(row.due<now?" overdue":"")} title={new Date(row.due).toLocaleString()}>{row.due<now?"Overdue":"Reply due"} · {new Intl.DateTimeFormat(undefined,{hour:"numeric",minute:"2-digit",...(day(row.due,now)==="Today"?{}:{month:"short",day:"numeric"})}).format(row.due)}</span> : <Receipt row={row}/>}</div>
       </>;
     return <Fragment key={row.id}>{showDay && <h2 className="post-day">{group}</h2>}
       {timeline ? <><button className={"post-row"+(row.position===anchor?" anchored":"")} aria-expanded={expanded?.id===row.id} onClick={()=>void expand(row.id)}>{content}</button>

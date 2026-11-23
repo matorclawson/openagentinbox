@@ -142,6 +142,9 @@ func (s *server) threads(_ http.ResponseWriter, r *http.Request) (any, error) {
 	if folder != "inbox" && folder != "sent" {
 		return nil, failure{400, "Unknown folder"}
 	}
+	if q.Get("zoom") != "" {
+		return s.threadTime(r, box, r.PathValue("root"))
+	}
 	before := int64(1<<63 - 1)
 	if v := q.Get("before"); v != "" {
 		before, e = strconv.ParseInt(v, 10, 64)

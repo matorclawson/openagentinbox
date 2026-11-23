@@ -5,7 +5,7 @@ set -euo pipefail
 base=/opt/openagentinbox
 service=openagentinbox.service
 root=$(cd "$(dirname "$0")/../.." && pwd)
-version=0.12.6
+version=0.12.7
 health=http://127.0.0.1:4310/api/health
 exec 9>"$base/install.lock"
 flock -n 9 || { echo 'Another installer is running.' >&2; exit 1; }
@@ -14,7 +14,7 @@ previous=$(readlink -e "$base/active")
 systemctl is-active --quiet "$service"
 old=$(curl -fsS --max-time 3 "$health")
 case "$old" in
-  *'"version":"0.12.6"'*) echo '0.12.6 is already serving.'; exit 0;;
+  *'"version":"0.12.7"'*) echo '0.12.7 is already serving.'; exit 0;;
   *'"version":"0.11.0"'*) before=0.11.0;;
   *'"version":"0.12.0"'*) before=0.12.0;;
   *'"version":"0.12.1"'*) before=0.12.1;;
@@ -22,6 +22,7 @@ case "$old" in
   *'"version":"0.12.3"'*) before=0.12.3;;
   *'"version":"0.12.4"'*) before=0.12.4;;
   *'"version":"0.12.5"'*) before=0.12.5;;
+  *'"version":"0.12.6"'*) before=0.12.6;;
   *'"version":"0.10.4"'*) before=0.10.4;;
   *'"version":"0.10.3"'*) before=0.10.3;;
   *'"version":"0.10.2"'*) before=0.10.2;;
@@ -34,7 +35,7 @@ case "$old" in
   *'"version":"0.7.0"'*) before=0.7.0;;
   *'"version":"0.6.0"'*) before=0.6.0;;
   *'"version":"0.5.0"'*) before=0.5.0;;
-  *) echo 'This upgrade supports a running 0.5.0, 0.6.0, 0.7.0, 0.8.0, 0.9.0, 0.9.1, 0.9.2, 0.10.0, 0.10.1, 0.10.2, 0.10.3, 0.10.4, 0.11.0, 0.12.0, 0.12.1, 0.12.2 0.12.3 0.12.4 or 0.12.5 installation.' >&2; exit 1;;
+  *) echo 'This upgrade supports a running 0.5.0, 0.6.0, 0.7.0, 0.8.0, 0.9.0, 0.9.1, 0.9.2, 0.10.0, 0.10.1, 0.10.2, 0.10.3, 0.10.4, 0.11.0, 0.12.0, 0.12.1, 0.12.2 0.12.3 0.12.4 0.12.5 or 0.12.6 installation.' >&2; exit 1;;
 esac
 release=$(mktemp -d "$base/releases/build.XXXXXXXX")
 bash "$root/scripts/build-console-release.sh" "$release"
@@ -61,14 +62,14 @@ wait_health(){
   return 1
 }
 wait_health "http://127.0.0.1:$port/api/health" "$instance" &&
-curl -fsS --max-time 3 "http://127.0.0.1:$port/api/health" | grep -Fq '"version":"0.12.6"' &&
+curl -fsS --max-time 3 "http://127.0.0.1:$port/api/health" | grep -Fq '"version":"0.12.7"' &&
 curl -fsS --max-time 3 -o /dev/null "http://127.0.0.1:$port/inboxes/operator" || { echo 'Candidate preflight failed. Current server is still serving.' >&2; exit 1; }
 cleanup
 pid=''
 trap - EXIT
 activate(){ ln -s "$1" "$base/active.next.$$"; mv -Tf "$base/active.next.$$" "$base/active"; }
 activate "$release"
-if systemctl restart "$service" && wait_health "$health" '"version":"0.12.6"'; then
+if systemctl restart "$service" && wait_health "$health" '"version":"0.12.7"'; then
   echo "Serving $version. Previous release retained at $previous."
 else
   activate "$previous"

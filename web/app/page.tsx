@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import {BodyText, mailTitle, Avatar, Receipt, MailTime, MailList, useMailClock, type Envelope} from "./mail-ui";
 import {splitMail} from "./mail-text";
+import {ThreadTime,type Scale} from "./thread-time";
 import {MailTools} from "./mail-tools";
 import {SettingsPage} from "./settings";
 import {Mator} from "./brand-art";
@@ -136,6 +137,10 @@ export default function Home() {
   useEffect(()=>{try{setCompact(localStorage.getItem("inbox-density")!=="comfortable")}catch{}},[]);
   function toggleDensity(){setCompact(!compact);try{localStorage.setItem("inbox-density",compact?"comfortable":"compact")}catch{}}
   const number=params.get("number")??"";
+  const zoom=(params.get("zoom")??"") as Scale|"";
+  const start=params.get("start")??"";
+  const [buckets,setBuckets]=useState<number[]>([]);
+  function chooseTime(scale:Scale|"",time:number){ navigate(pathname+(scale?"?zoom="+scale+"&start="+time:"")); }
   const after=params.get("after")??"", anchor=params.get("atSeq")??"";
   const [threadInfo,setThreadInfo]=useState({newer:"",title:"",received:0,sent:0});
   function browse(query:string,pending:boolean,page="",direction="before"){
@@ -143,6 +148,7 @@ export default function Home() {
     if(query)params.set("q",query);
     if(pending)params.set("view","requests");
     if(page)params.set(direction,page);
+    if(zoom && !query && page && (direction==="before"||direction==="after")){params.set("zoom",zoom);params.set("start",start)}
     navigate(pathname+(params.size?"?"+params:""));
   }
   const parts = pathname.split("/");
@@ -210,11 +216,11 @@ export default function Home() {
     const q = new URLSearchParams({
       box,
       folder,
-      q:term,view:requests?"requests":"",before,after,atSeq:anchor,number,
+      q:term,view:requests?"requests":"",before,after,atSeq:anchor,number,zoom,start,
     });
     const data = await api("desk/threads"+(threadId?"/"+threadId:"")+"?" + q);
     if (gen === generation.current) {
-      list(data.rows);
+      list(data.rows);setBuckets(data.buckets??[]);
       if(number && data.anchor){
         const permanent=pathname+"?atSeq="+encodeURIComponent(data.anchor);
         history.replaceState(history.state,"",permanent);setPath(permanent);
@@ -225,7 +231,7 @@ export default function Home() {
   }
   useEffect(() => {
     if (!messageId && s?.name && acc && (folder === "inbox" || folder === "sent")) {
-      list([]);
+      list([]);setBuckets([]);
       next(null);
       void task(() => load());
     }
@@ -727,12 +733,9 @@ export default function Home() {
               </div>
               <div className="mail-panel">
                 <MailTools thread={!!threadId} query={term} requests={requests} sent={folder==="sent"} compact={compact} toggle={toggleDensity} apply={browse}/>
-                {threadId && <nav className="thread-nav" aria-label="Conversation navigation">
-                  <button aria-pressed={!before&&!after&&!anchor} onClick={()=>before||after||anchor?browse(term,false):void task(()=>load())}>Latest</button>
-                  <button aria-pressed={after==="0"} onClick={()=>browse(term,false,"0","after")}>First</button>
-                  {!term && <form className="jump-number" onSubmit={e=>{e.preventDefault();const value=new FormData(e.currentTarget).get("number");if(value)browse("",false,String(value),"number")}}>
-                    <input aria-label="Message number from the beginning" placeholder="Message #" name="number" min="1" type="number" required/><button>Jump</button>
-                  </form>}
+                {threadId && <ThreadTime scale={zoom} start={Number(start)} counts={buckets} choose={chooseTime}/>}
+                {threadId && <nav className="thread-nav" aria-label="Messages in this window">
+                  <span>{term?"Search results":zoom?"Messages in this period":"All messages"}</span>
                   <span className="thread-steps"><button disabled={!cursor||busy} onClick={()=>browse(term,false,cursor!)}>← Older</button>
                   <button disabled={!threadInfo.newer||busy} onClick={()=>browse(term,false,threadInfo.newer,"after")}>Newer →</button></span>
                 </nav>}
@@ -743,7 +746,7 @@ export default function Home() {
                 {!rows.length && (
                   <div className="empty">
                     <Mator pose="searching"/>
-                    <h2>{busy ? "Loading messages…" : term ? "No matching messages" : requests ? "No requests awaiting a reply" : "No messages yet"}</h2>
+                    <h2>{busy ? "Loading messages…" : term ? "No matching messages" : requests ? "No requests awaiting a reply" : zoom ? "No messages in this period" : "No messages yet"}</h2>
                     {!busy && !term && !requests && !agentNames.length && (
                       <button onClick={() => go("agents")}>
                         Add your first agent
