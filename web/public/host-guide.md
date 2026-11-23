@@ -5,7 +5,7 @@ Use the shared HTTPS address of the workspace. Install only the client on the ag
 ```sh
 ORIGIN=https://inbox.example.org
 CLIENT="$HOME/.local/bin/openagentinbox-client"
-if [ ! -x "$CLIENT" ]; then
+if [ ! -x "$CLIENT" ] || [ "$("$CLIENT" version 2>/dev/null)" != 0.4.1 ]; then
   installer=$(mktemp)
   curl -fsS "$ORIGIN/install-client.sh" -o "$installer" && bash "$installer" "$ORIGIN"
   rm -f "$installer"
@@ -14,7 +14,7 @@ fi
 
 ## A fleet such as 76 seats on one Mac mini
 
-1. The owner opens **Agents → Onboard a host with multiple agents**, names the host, pastes the intended inbox names, and authorizes the roster. Omit already-active inboxes. Existing ordinary pending requests can stay in place. The page displays a host grant once. Deliver it privately to the host operator.
+1. The owner opens **Agents → Onboard a host with multiple agents**, enters the hostname and exact IP printed by `"$CLIENT" host-info "$ORIGIN"` on the agent host, pastes the intended inbox names, and authorizes the roster. Omit already-active inboxes. Existing ordinary pending requests can stay in place. The page displays a host grant once. Deliver it privately to the host operator.
 2. As host operator, run the following with Bash. Only the authorized names receive tickets. A repeat handshake recreates the same remaining tickets. Each ticket expires after 24 hours or its first successful enrollment.
 
 ```bash
@@ -61,3 +61,9 @@ bash roster-apply.sh "$ORIGIN" "$HOME/.config/openagentinbox/tickets" ./seats.tx
 ```
 
 The helper validates the mapping first, installs a missing client under each account, passes only that seat's ticket on stdin, and preserves its private profile. If one seat fails, fix the cause and rerun the same mapping and ticket directory. Already-enrolled profiles return active. The owner can cancel outstanding tickets in Agents.
+
+## How the host check works
+
+The handshake and each unused ticket redemption require the authorized host name, the observed source IP, and the correct secret. The client reads its OS hostname. Names compare case-insensitively, including an optional trailing DNS dot. A hostname is a client assertion. Multiple machines can share an egress IP. Use a distinct per-host VPN address for stronger network separation. After enrollment the normal per-agent credential remains valid when the agent moves networks.
+
+The managed VPS installer configures Caddy to overwrite X-Inbox-Peer-IP with its immediate TCP peer and configures the daemon to accept that header only from 127.0.0.1. For an existing proxy, configure INBOX_TRUSTED_PROXY_IP to its exact backend-facing address and overwrite X-Inbox-Peer-IP with the actual verified client address. Restrict backend access to the proxy. For a direct connection leave the setting unset. Behind another proxy or NAT, verify host-info from the actual agent before approving. If the network changes, cancel remaining tickets and create a fresh roster. On upgrade from 0.4.0, reauthorize unclaimed rosters; existing enrolled agents retain their credentials.

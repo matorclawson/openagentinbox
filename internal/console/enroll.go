@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
-	"net"
+
 	"net/http"
 	"strings"
 )
@@ -31,7 +31,7 @@ func (s *server) enroll(_ http.ResponseWriter, r *http.Request) (any, error) {
 	if b == "" {
 		return nil, failure{401, "Generate a bearer credential"}
 	}
-	var q struct{ Name, Ticket string }
+	var q struct{ Name, Ticket, Host string }
 	if e := input(r, &q); e != nil {
 		return nil, e
 	}
@@ -70,7 +70,11 @@ func (s *server) enroll(_ http.ResponseWriter, r *http.Request) (any, error) {
 		if !bearerRE.MatchString(q.Ticket) {
 			return nil, failure{403, "Invalid roster ticket"}
 		}
-		if e = tx.QueryRow("DELETE FROM roster WHERE name=? AND ticket=? AND expires>? RETURNING name", q.Name, hash(q.Ticket), now()).Scan(&name); e != nil {
+		ip, err := s.peerIP(r)
+		if err != nil {
+			return nil, err
+		}
+		if e = tx.QueryRow("DELETE FROM roster WHERE name=? AND ticket=? AND expires>? AND substr(host,instr(host,'/')+1)=? AND host IN (SELECT host FROM roster_binding WHERE ip=?) RETURNING name", q.Name, hash(q.Ticket), now(), hostname(q.Host), ip).Scan(&name); e != nil {
 			if errors.Is(e, sql.ErrNoRows) {
 				return nil, failure{403, "Roster ticket expired or unavailable"}
 			}
@@ -93,7 +97,10 @@ func (s *server) enroll(_ http.ResponseWriter, r *http.Request) (any, error) {
 	var expiry int64
 	e = tx.QueryRow("SELECT name,code,expires FROM enrollments WHERE key=?", key).Scan(&name, &code, &expiry)
 	if errors.Is(e, sql.ErrNoRows) {
-		peer, _, _ := net.SplitHostPort(r.RemoteAddr)
+		peer, err := s.peerIP(r)
+		if err != nil {
+			return nil, err
+		}
 		var all int
 		if e = tx.QueryRow("SELECT count(*),count(CASE WHEN peer=? THEN 1 END) FROM enrollments", peer).Scan(&all, &n); e != nil {
 			return nil, e

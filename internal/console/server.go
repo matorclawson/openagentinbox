@@ -39,6 +39,7 @@ func (f failure) Error() string { return f.msg }
 
 type handler func(http.ResponseWriter, *http.Request) (any, error)
 type server struct {
+	trustedProxy                                                 string
 	live                                                         changes
 	peerLimit                                                    int
 	db                                                           *sql.DB
@@ -110,6 +111,13 @@ func Run() error {
 		return errors.New("INBOX_PENDING_PER_HOST must be between 1 and 512")
 	}
 	s.peerLimit = limit
+	if raw := os.Getenv("INBOX_TRUSTED_PROXY_IP"); raw != "" {
+		ip, ok := literalIP(raw)
+		if !ok {
+			return errors.New("INBOX_TRUSTED_PROXY_IP requires a single proxy IP")
+		}
+		s.trustedProxy = ip.String()
+	}
 	listen := env("INBOX_LISTEN", "127.0.0.1")
 	if !validOrigin(s.origin) || (listen != "127.0.0.1" && !(listen == "0.0.0.0" && strings.HasPrefix(s.origin, "https://"))) {
 		return errors.New("invalid origin or bind address")
@@ -193,7 +201,7 @@ func Run() error {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		json.NewEncoder(w).Encode(object{"product": "openagentinbox", "version": "0.4.0", "instance": instance, "setup": n == 0})
+		json.NewEncoder(w).Encode(object{"product": "openagentinbox", "version": "0.4.1", "instance": instance, "setup": n == 0})
 	})
 	s.routes(mux)
 	mux.Handle("/", http.FileServer(http.Dir(ui)))
@@ -202,7 +210,7 @@ func Run() error {
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Frame-Options", "DENY")
 		mux.ServeHTTP(w, r)
-	}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 65 * time.Second, IdleTimeout: 60 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	done := make(chan struct{})

@@ -27,7 +27,7 @@ while read -r name account uid; do
    cd "$HOME"
    origin=$1; name=$2; client="$HOME/.local/bin/openagentinbox-client"
    unset OPENAGENTINBOX_PROFILE INBOX_BIN_DIR
-   if [[ ! -x $client ]];then
+   if [[ ! -x $client || $("$client" version 2>/dev/null) != 0.4.1 ]];then
      installer=$(mktemp); trap '\''rm -f "$installer"'\'' EXIT
      curl -fsS "$origin/install-client.sh" -o "$installer"
      bash "$installer" "$origin" >&2

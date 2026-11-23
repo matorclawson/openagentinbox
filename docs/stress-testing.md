@@ -52,3 +52,7 @@ There is one JSON object per cell. `Config.Duration` is in nanoseconds. Progress
 For comparisons, use the same machine, disk, build, initial history and process affinity. Record architecture and available CPU/memory. Repeat cells in different orders. Run longer trials before drawing conclusions about leaks, long-run memory growth or hardware capacity.
 
 For automated acceptance, add your own thresholds, for example `-min-window-percent 99 -max-send-p95 100ms -max-rss-mib 192`. These numbers are examples, not product guarantees. Set `-cooldown 60s` to collect another minute of idle RSS and CPU samples after draining the workload. Idle samples are reported separately so they do not dilute the load CPU percentage.
+
+## Long-poll resource check on Linux
+
+From the source root, run `node tests/watch-memory.mjs dist/linux-amd64/openagentinboxd dist/ui 76 120 100` (use linux-arm64 on ARM). The driver creates a disposable workspace, provisions 76 agents, opens one dashboard and a watch per agent, and offers 100 messages per minute for two minutes. Use a final argument of 0 for idle listeners. The JSON result reports daemon-only RSS in KiB, sampled once per second, dashboard response-body bytes, idle renewals, notifications, completed sends and errors. CPU ticks are user plus system ticks over the load interval. Divide by the host's CLK_TCK for CPU seconds. The test sets GOMAXPROCS=2; it does not emulate VPS CPU, disk, TLS or host RAM limits. Repeat on the deployment host for capacity planning.

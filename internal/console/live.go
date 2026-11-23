@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
+	"maps"
 	"net/http"
 	"strconv"
 	"sync"
@@ -15,6 +16,10 @@ import (
 // Agent state and its timeline change in the same transaction, including enrollments via a host.
 const liveSchema = `
 CREATE TABLE IF NOT EXISTS roster(name TEXT PRIMARY KEY,ticket TEXT UNIQUE NOT NULL,host TEXT NOT NULL,expires INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS roster_host ON roster(host);
+CREATE TABLE IF NOT EXISTS roster_binding(host TEXT PRIMARY KEY,ip TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS release_binding AFTER DELETE ON roster WHEN NOT EXISTS(SELECT 1 FROM roster WHERE host=OLD.host) BEGIN DELETE FROM roster_binding WHERE host=OLD.host; END;
+CREATE TRIGGER IF NOT EXISTS reserve_roster_names BEFORE INSERT ON agents WHEN EXISTS(SELECT 1 FROM roster WHERE name=NEW.name AND expires>unixepoch('subsec')*1000) BEGIN SELECT RAISE(IGNORE); END;
 CREATE TABLE IF NOT EXISTS lifecycle(id INTEGER PRIMARY KEY,kind TEXT NOT NULL,name TEXT NOT NULL,at INTEGER NOT NULL DEFAULT (unixepoch('subsec')*1000));
 CREATE TRIGGER IF NOT EXISTS log_join AFTER INSERT ON enrollments BEGIN INSERT INTO lifecycle(kind,name) VALUES('Requested access',NEW.name); END;
 CREATE TRIGGER IF NOT EXISTS log_enrolled AFTER INSERT ON agents BEGIN INSERT INTO lifecycle(kind,name) VALUES('Enrolled',NEW.name); END;
@@ -23,18 +28,23 @@ CREATE TRIGGER IF NOT EXISTS trim_lifecycle AFTER INSERT ON lifecycle BEGIN DELE
 
 // Broadcast invalidations only. SQLite supplies the current snapshot after reconnect.
 type changes struct {
-	watching map[string]int
-	mu       sync.Mutex
-	rev      uint64
-	epoch    string
-	ch       chan struct{}
-	waiting  int
+	watching      map[string]int
+	visible       map[string]bool
+	presenceTimer *time.Timer
+	mu            sync.Mutex
+	rev           uint64
+	epoch         string
+	ch            chan struct{}
+	waiting       int
 }
 
 func (c *changes) cursor() string { return c.epoch + "-" + strconv.FormatUint(c.rev, 10) }
 func (c *changes) signal() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.signalLocked()
+}
+func (c *changes) signalLocked() {
 	c.rev++
 	if c.ch != nil {
 		close(c.ch)
@@ -79,38 +89,66 @@ func (c *changes) subscribe(name string) func() {
 		c.watching = map[string]int{}
 	}
 	c.watching[name]++
-	first := c.watching[name] == 1
-	c.mu.Unlock()
-	if first {
-		c.signal()
+	if c.watching[name] == 1 {
+		c.presenceChanged()
 	}
+	c.mu.Unlock()
 	return func() {
 		c.mu.Lock()
+		defer c.mu.Unlock()
 		c.watching[name]--
-		last := c.watching[name] == 0
-		if last {
+		if c.watching[name] == 0 {
 			delete(c.watching, name)
-		}
-		c.mu.Unlock()
-		if last {
-			c.signal()
+			c.presenceChanged()
 		}
 	}
+}
+func (c *changes) presenceChanged() {
+	// One timer per server. A normal poll renewal leaves the visible seat set unchanged.
+	if c.presenceTimer != nil {
+		return
+	}
+	c.presenceTimer = time.AfterFunc(350*time.Millisecond, func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		c.presenceTimer = nil
+		if len(c.visible) == len(c.watching) {
+			same := true
+			for name := range c.watching {
+				if !c.visible[name] {
+					same = false
+					break
+				}
+			}
+			if same {
+				return
+			}
+		}
+		v := make(map[string]bool, len(c.watching))
+		for name := range c.watching {
+			v[name] = true
+		}
+		c.visible = v
+		c.signalLocked()
+	})
 }
 func (c *changes) watchers() map[string]bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	v := make(map[string]bool, len(c.watching))
-	for name := range c.watching {
-		v[name] = true
+	if c.visible == nil {
+		return map[string]bool{}
 	}
-	return v
+	return maps.Clone(c.visible)
 }
 func (s *server) liveRoutes(add func(string, handler)) {
 	add("GET /api/desk/live", s.workspace)
 	add("POST /api/desk/batch", s.batch)
 	add("POST /api/desk/roster", s.grant)
 	add("POST /api/desk/roster/cancel", s.cancelRoster)
+	add("GET /api/agent/peer", func(_ http.ResponseWriter, r *http.Request) (any, error) {
+		ip, e := s.peerIP(r)
+		return object{"ip": ip}, e
+	})
 	add("POST /api/agent/handshake", s.handshake)
 	add("GET /api/agent/watch", s.watch)
 }
@@ -122,14 +160,17 @@ func (s *server) workspace(_ http.ResponseWriter, r *http.Request) (any, error) 
 	if ok, e := s.signed(r); e != nil || !ok {
 		return nil, failure{401, "Sign in to continue"}
 	}
+	if cursor == r.URL.Query().Get("after") && r.URL.Query().Get("compact") == "1" {
+		return object{"cursor": cursor, "unchanged": true}, nil
+	}
 	data := object{"cursor": cursor, "peerLimit": s.peerLimit, "watching": s.live.watchers()}
 	// Array-valued queries keep the wire format stable for an empty workspace.
 	for key, query := range map[string]string{
-		"pending":  "SELECT name,code,expires FROM enrollments WHERE expires>?1 ORDER BY expires,code",
+		"pending":  "SELECT name,code,expires,peer FROM enrollments WHERE expires>?1 ORDER BY expires,code",
 		"agents":   "SELECT name,key IS NOT NULL FROM agents ORDER BY name",
 		"activity": "SELECT kind,name,at FROM lifecycle ORDER BY id DESC LIMIT 12",
 		"mail":     "SELECT m.subject,m.sender,d.seat,m.created_text,m.id FROM messages m JOIN deliveries d USING(seq) ORDER BY m.seq DESC LIMIT 8",
-		"roster":   "SELECT substr(host,instr(host,'/')+1),count(*),min(expires),host FROM roster WHERE expires>?1 GROUP BY host ORDER BY host",
+		"roster":   "SELECT substr(host,instr(host,'/')+1),count(*),min(expires),host,coalesce((SELECT ip FROM roster_binding b WHERE b.host=roster.host),'Reauthorize roster') FROM roster WHERE expires>?1 GROUP BY host ORDER BY host",
 	} {
 		var args []any
 		if key == "pending" || key == "roster" {
@@ -224,13 +265,15 @@ func rosterTicket(secret, name string) string {
 }
 func (s *server) grant(_ http.ResponseWriter, r *http.Request) (any, error) {
 	var q struct {
-		Host  string
-		Names []string
+		Host, IP string
+		Names    []string
 	}
 	if e := input(r, &q); e != nil {
 		return nil, e
 	}
-	if !nameRE.MatchString(q.Host) || len(q.Names) < 1 || len(q.Names) > 512 {
+	q.Host = hostname(q.Host)
+	ip, validIP := literalIP(q.IP)
+	if !validIP || q.Host == "" || len(q.Names) < 1 || len(q.Names) > 512 {
 		return nil, failure{400, "Choose a host and 1–512 inbox names"}
 	}
 	secret := token()
@@ -241,6 +284,9 @@ func (s *server) grant(_ http.ResponseWriter, r *http.Request) (any, error) {
 	}
 	defer tx.Rollback()
 	if _, e = tx.Exec("DELETE FROM roster WHERE expires<=?", now()); e != nil {
+		return nil, e
+	}
+	if _, e = tx.Exec("INSERT INTO roster_binding VALUES(?,?)", hash(secret)+"/"+q.Host, ip.String()); e != nil {
 		return nil, e
 	}
 	for _, n := range q.Names {
@@ -306,7 +352,15 @@ func (s *server) handshake(_ http.ResponseWriter, r *http.Request) (any, error) 
 	if b == "" {
 		return nil, failure{403, "Host grant required"}
 	}
-	rows, e := s.db.QueryContext(r.Context(), "SELECT name FROM roster WHERE host GLOB ? AND expires>? ORDER BY name", hash(b)+"/*", now())
+	var q struct{ Host string }
+	if e := input(r, &q); e != nil {
+		return nil, e
+	}
+	ip, e := s.peerIP(r)
+	if e != nil {
+		return nil, e
+	}
+	rows, e := s.db.QueryContext(r.Context(), "SELECT name FROM roster JOIN roster_binding USING(host) WHERE host=? AND ip=? AND expires>? ORDER BY name", hash(b)+"/"+hostname(q.Host), ip, now())
 	if e != nil {
 		return nil, e
 	}
@@ -350,11 +404,15 @@ func (s *server) watch(_ http.ResponseWriter, r *http.Request) (any, error) {
 		return nil, e
 	}
 	if after >= latest {
+		timeout := 18 * time.Second
+		if r.URL.Query().Get("wait") == "50" {
+			timeout = 50 * time.Second
+		}
 		select {
 		case <-w.Changes():
 		case <-r.Context().Done():
 			return nil, r.Context().Err()
-		case <-time.After(18 * time.Second):
+		case <-time.After(timeout):
 		}
 		if _, e = s.actor(r); e != nil {
 			return nil, e

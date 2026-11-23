@@ -6,11 +6,11 @@ export type Live = {
   cursor: string;
   peerLimit: number;
   watching: Record<string,boolean>;
-  pending: [string,string,number][];
+  pending: [string,string,number,string][];
   agents: [string,number][];
   activity: [string,string,number][];
   mail: [string,string,string,string,string][];
-  roster: [string,number,number,string][];
+  roster: [string,number,number,string,string][];
 };
 export function useWorkspace(owner?: string|null) {
   const [data,setData]=useState<Live|null>(null);
@@ -20,15 +20,16 @@ export function useWorkspace(owner?: string|null) {
     if (!owner) return;
     const abort=new AbortController();
     async function listen(){
-      let cursor="",delay=800;
+      let cursor="",delay=800,expiry=Infinity;
       while (!abort.signal.aborted) {
         try {
-          const r=await fetch("/api/desk/live?after="+encodeURIComponent(cursor),{signal:abort.signal,cache:"no-store"});
+          if(Date.now()>=expiry)cursor="";
+          const r=await fetch("/api/desk/live?compact=1&after="+encodeURIComponent(cursor),{signal:abort.signal,cache:"no-store"});
           if(r.status===401){setData(null);setConnection("Session ended");return}
           if(!r.ok) throw Error("disconnected");
-          const snapshot:Live=await r.json();
+          const snapshot:Live & {unchanged?:boolean}=await r.json();
           if(abort.signal.aborted)return;
-          cursor=snapshot.cursor;setData(snapshot);setConnection("Live");delay=800;
+          cursor=snapshot.cursor;if(!snapshot.unchanged){setData(snapshot);expiry=Math.min(Infinity,...snapshot.pending.map(v=>v[2]),...snapshot.roster.map(v=>v[2]))}setConnection("Live");delay=800;
         }catch{if(abort.signal.aborted)return;setConnection("Reconnecting");delay=Math.min(15000,delay*2)}
         await new Promise(resolve=>setTimeout(resolve,delay));
       }
@@ -59,23 +60,24 @@ async function post(path:string,body:object){
  const v=await r.json();if(!r.ok)throw Error(v.error||"Request failed");return v;
 }
 export function EnrollmentQueue({data}:{data:Live}){
- const [review,setReview]=useState<Live["pending"]|null>(null),[host,setHost]=useState(""),[names,setNames]=useState(""),[secret,setSecret]=useState(""),[msg,setMsg]=useState(""),[busy,setBusy]=useState(false);
+ const [review,setReview]=useState<Live["pending"]|null>(null),[host,setHost]=useState(""),[ip,setIP]=useState(""),[names,setNames]=useState(""),[secret,setSecret]=useState(""),[msg,setMsg]=useState(""),[busy,setBusy]=useState(false);
  async function action(fn:()=>Promise<void>){setBusy(true);setMsg("");try{await fn()}catch(e){setMsg((e as Error).message)}finally{setBusy(false)}}
  const queue=review??data.pending;
  return <div className="queue"><section className="card detail">
  <h2>Enrollment queue <small>{queue.length}</small></h2>
  <p>Match the names and codes with the requests from your agents.</p>
- {queue.length>0&&<ul className="requests">{queue.map(([n,c])=><li key={c}><strong>{n}</strong><code>{c}</code>{!review&&<button onClick={()=>setReview([[n,c,0]])}>Review</button>}</li>)}</ul>}
+ {queue.length>0&&<ul className="requests">{queue.map(([n,c,expires,peer])=><li key={c}><strong>{n}</strong><small>{peer}</small><code>{c}</code>{!review&&<button onClick={()=>setReview([[n,c,expires,peer]])}>Review</button>}</li>)}</ul>}
  {!queue.length&&<p>No requests waiting.</p>}
  {review?<div className="actions">{[true,false].map(approve=><button key={String(approve)} disabled={busy} onClick={()=>void action(async()=>{await post("batch",{approve,requests:review.map(([name,code])=>({name,code}))});setReview(null);setMsg(approve?"Access granted.":"Requests dismissed.")})}>{approve?"Approve":"Dismiss"} {review.length}</button>)}<button onClick={()=>setReview(null)}>Cancel</button></div>:queue.length>0&&<button onClick={()=>setReview([...queue])}>Review all {queue.length} requests</button>}
  </section><details className="card detail"><summary>Onboard a host with multiple agents</summary>
  <p>Authorize an exact roster for 24 hours. Each agent receives a single-use ticket for its own name. This works even when the ordinary queue is full.</p>
- <form onSubmit={e=>{e.preventDefault();void action(async()=>{const roster=names.trim().split(/[\s,]+/);const result=await post("roster",{host,names:roster});setSecret(result.secret);setNames("")})}}>
+ <form onSubmit={e=>{e.preventDefault();void action(async()=>{const roster=names.trim().split(/[\s,]+/);const result=await post("roster",{host,ip,names:roster});setSecret(result.secret);setNames("")})}}>
  <label>Host name<input value={host} onChange={e=>setHost(e.target.value)} required placeholder="mac-mini"/></label>
+ <label>Source IP address<input value={ip} onChange={e=>setIP(e.target.value.trim())} required placeholder="100.64.0.12"/></label><p>Run <code>openagentinbox-client host-info INBOX_URL</code> on the agent host and enter both values.</p>
  <label>Agent names<textarea value={names} onChange={e=>setNames(e.target.value)} required placeholder="architect, openpassword, openagentinbox"/></label>
  <button disabled={busy}>Authorize roster</button></form>
  {secret&&<label>Host grant · copy once to the trusted host operator<input readOnly value={secret} onFocus={e=>e.target.select()}/><button onClick={()=>setSecret("")}>Hide grant</button></label>}
  <a href="/host-guide.md">Host client setup instructions</a>
- {data.roster.map(([h,count,expires,id])=><p key={id}>{h} · {count} remaining · expires {new Date(expires).toLocaleString()} <button disabled={busy} onClick={()=>void action(async()=>{await post("roster/cancel",{id});setSecret("");setMsg("Unclaimed tickets canceled.")})}>Cancel remaining tickets</button></p>)}
+ {data.roster.map(([h,count,expires,id,ip])=><p key={id}>{h} · {ip} · {count} remaining · expires {new Date(expires).toLocaleString()} <button disabled={busy} onClick={()=>void action(async()=>{await post("roster/cancel",{id});setSecret("");setMsg("Unclaimed tickets canceled.")})}>Cancel remaining tickets</button></p>)}
  </details>{msg&&<p role="status">{msg}</p>}</div>
 }

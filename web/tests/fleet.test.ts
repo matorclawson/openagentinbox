@@ -15,7 +15,7 @@ test("full ordinary queue, one handshake for 76 agents, scoped wake and atomic r
  const owner={cookie:setup.headers["set-cookie"].split(";")[0]};
  const key=()=>randomBytes(32).toString("base64url");
  const auth=(token:string)=>({authorization:"Bearer "+token});
- const enroll=(name:string,token:string,ticket?:string)=>post("/api/agent/enroll",{name,ticket},auth(token));
+ const enroll=(name:string,token:string,ticket?:string)=>post("/api/agent/enroll",{name,ticket,host:"mac-mini"},auth(token));
  const desk=(url:string)=>a.inject({url:"/api/desk/"+url,headers:owner});
  const names=Array.from({length:76},(_,i)=>"agent-"+i),keys=names.map(key);
  const pending=[];
@@ -26,10 +26,17 @@ test("full ordinary queue, one handshake for 76 agents, scoped wake and atomic r
  assert.equal((await post("/api/desk/batch",{approve:true,requests:[pending[0],{name:"missing",code:"missing"}].map(({name,code})=>({name,code}))},owner)).statusCode,409);
  assert.equal((await desk("live")).json().pending.length,8);
  const live=desk("live?after="+snap.cursor);
- const grant=await post("/api/desk/roster",{host:"mac-mini",names},owner);assert.equal(grant.statusCode,200);
+ const grant=await post("/api/desk/roster",{host:"mac-mini",ip:"127.0.0.1",names},owner);assert.equal(grant.statusCode,200);
  const secret=grant.json().secret;
- assert.equal((await live).json().roster[0][1],76);
- assert.equal((await post("/api/agent/handshake",{},auth(secret))).json().names.length,76);
+ const req=pending[0];assert.equal((await post("/api/desk/enrollment",{name:req.name,code:req.code,approve:true},owner)).statusCode,409);
+ assert.equal((await post("/api/agent/handshake",{host:"other"},auth(secret))).statusCode,403);
+ const wrong=await post("/api/desk/roster",{host:"other",ip:"192.0.2.9",names:["remote-only"]},owner);
+ assert.equal((await post("/api/agent/handshake",{host:"other"},{...auth(wrong.json().secret),"X-Inbox-Peer-IP":"192.0.2.9"})).statusCode,403);
+ await post("/api/agent/enroll",{name:"remote-only",host:"other",ticket:createHmac("sha256",wrong.json().secret).update("remote-only").digest("base64url")},auth(key())).then(r=>assert.equal(r.statusCode,403));
+ const extras=(await desk("live")).json().roster;await post("/api/desk/roster/cancel",{id:extras.find((v:unknown[])=>v[0]==="other")[3]},owner);
+
+ assert.ok((await live).json().roster.some((r:unknown[])=>r[0]==="mac-mini"&&r[1]===76));
+ assert.equal((await post("/api/agent/handshake",{host:"mac-mini"},auth(secret))).json().names.length,76);
  const ticket=(name:string)=>createHmac("sha256",secret).update(name).digest("base64url");
  assert.equal((await enroll("outsider",key(),ticket(names[0]))).statusCode,403);
  const joined=await Promise.all(names.map((n,i)=>enroll(n,keys[i],ticket(n))));

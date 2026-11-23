@@ -107,7 +107,7 @@ func ensure(path, origin, name string) (profile, error) {
 	return p, nil
 }
 
-var client = http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+var client = http.Client{Timeout: 60 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
 type remoteError struct {
 	status int
@@ -130,7 +130,9 @@ func request(ctx context.Context, p profile, path string, body any) (json.RawMes
 	if e != nil {
 		return nil, e
 	}
-	r.Header.Set("Authorization", "Bearer "+p.Token)
+	if p.Token != "" {
+		r.Header.Set("Authorization", "Bearer "+p.Token)
+	}
 	r.Header.Set("Content-Type", "application/json")
 	resp, e := client.Do(r)
 	if e != nil {
@@ -161,7 +163,7 @@ func watch(ctx context.Context, path string, p profile) error {
 	}
 	delay := time.Second
 	for ctx.Err() == nil {
-		b, e := request(ctx, p, "watch?after="+strconv.FormatInt(cursor, 10), nil)
+		b, e := request(ctx, p, "watch?wait=50&after="+strconv.FormatInt(cursor, 10), nil)
 		if e != nil {
 			var httpErr remoteError
 			if errors.As(e, &httpErr) && (httpErr.status == 401 || httpErr.status == 403) {
@@ -209,9 +211,13 @@ func watch(ctx context.Context, path string, p profile) error {
 	return nil
 }
 
-const usage = "openagentinbox-client join ORIGIN NAME [--ticket-stdin] | handshake ORIGIN DIRECTORY | inbox [BEFORE] | read ID | send TO SUBJECT BODY [UUID] | watch"
+const usage = "openagentinbox-client join ORIGIN NAME [--ticket-stdin] | host-info ORIGIN | handshake ORIGIN DIRECTORY | inbox [BEFORE] | read ID | send TO SUBJECT BODY [UUID] | watch"
 
 func run(ctx context.Context, args []string) error {
+	if len(args) == 1 && args[0] == "version" {
+		fmt.Println("0.4.1")
+		return nil
+	}
 	if len(args) == 0 || args[0] == "help" {
 		fmt.Println(usage)
 		return nil
@@ -228,6 +234,24 @@ func run(ctx context.Context, args []string) error {
 	var p profile
 	var body any
 	var route string
+	if cmd == "host-info" && len(a) == 1 {
+		if !validOrigin(a[0]) {
+			return errors.New("invalid origin")
+		}
+		host, e := os.Hostname()
+		if e != nil {
+			return e
+		}
+		b, e := request(ctx, profile{Origin: a[0]}, "peer", nil)
+		if e != nil {
+			return e
+		}
+		var reply struct{ IP string }
+		if e = json.Unmarshal(b, &reply); e != nil {
+			return e
+		}
+		return json.NewEncoder(os.Stdout).Encode(map[string]string{"hostname": host, "ip": reply.IP})
+	}
 	if cmd == "handshake" && len(a) == 2 {
 		if !validOrigin(a[0]) {
 			return errors.New("invalid origin")
@@ -237,7 +261,11 @@ func run(ctx context.Context, args []string) error {
 			return e
 		}
 		host := strings.TrimSpace(string(raw))
-		b, e := request(ctx, profile{Origin: a[0], Token: host}, "handshake", struct{}{})
+		localHost, e := os.Hostname()
+		if e != nil {
+			return e
+		}
+		b, e := request(ctx, profile{Origin: a[0], Token: host}, "handshake", map[string]string{"host": localHost})
 		if e != nil {
 			return e
 		}
@@ -294,6 +322,11 @@ func run(ctx context.Context, args []string) error {
 			if e != nil {
 				return e
 			}
+			localHost, e := os.Hostname()
+			if e != nil {
+				return e
+			}
+			q["host"] = localHost
 			q["ticket"] = strings.TrimSpace(string(b))
 			if len(q["ticket"]) != 43 {
 				return errors.New("expected one roster ticket on stdin")

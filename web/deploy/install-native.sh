@@ -99,7 +99,7 @@ rollback(){
 }
 trap rollback EXIT
 if (( managed )); then
-  printf '%s {\n    reverse_proxy 127.0.0.1:4310\n}\n' "$domain" > "$tmp/site"
+  printf '%s {\n    reverse_proxy 127.0.0.1:4310 {\n        header_up X-Inbox-Peer-IP {http.request.remote.host}\n    }\n}\n' "$domain" > "$tmp/site"
   publish "$tmp/site" "$site"
   if ! grep -Fxq "import $site" "$caddyfile"; then
     # A permanent copy also makes the single import easy to undo by hand.
@@ -111,6 +111,7 @@ if (( managed )); then
   caddy validate --config "$caddyfile" --adapter caddyfile
 fi
 printf 'INBOX_ORIGIN=https://%s\n' "$domain" > "$tmp/origin"
+if (( managed ));then echo INBOX_TRUSTED_PROXY_IP=127.0.0.1 >> "$tmp/origin";fi
 publish "$tmp/origin" "$cfg/origin.env"
 publish "$src/deploy/openagentinbox.service" "$unit"
 activate "$release"
