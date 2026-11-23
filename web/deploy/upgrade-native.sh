@@ -48,7 +48,7 @@ runuser -u openagentinbox -- env -i PATH=/usr/bin:/bin HOME="$probe" INBOX_DATA=
 pid=$!
 wait_health(){
   local target=$1 needle=$2 i
-  for ((i=0;i<40;i++)); do
+  for ((i=0;i<480;i++)); do
     if curl -fsS --max-time 1 "$target" 2>/dev/null | grep -Fq "$needle"; then return 0; fi
     sleep 0.25
   done

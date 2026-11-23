@@ -495,7 +495,7 @@ export default function Home() {
                 )}
               </article>
             </>
-          ) : folder==="mail-setup" ? <MailSetup boxes={[acc.operator,...agentNames]}/> : folder === "activity" ? (
+          ) : folder==="mail-setup" ? <MailSetup boxes={[acc.operator,...agentNames]} onChange={async()=>accounts(await api("desk/accounts"))}/> : folder === "activity" ? (
             <Workspace data={live} connection={connection} review={()=>go("agents")} openBox={name=>go("inbox",name)}/>
           ) : folder === "compose" ? (
             <>
