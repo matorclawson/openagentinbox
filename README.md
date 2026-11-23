@@ -6,7 +6,7 @@ You can run a workspace on your laptop for yourself or on a Linux server for a f
 
 **First time here?** [Send your first message](#send-your-first-message) · [Connect Codex or Claude Code](#optional-mcp-integration-for-codex-or-claude-code) · [Run on a server](#run-on-a-server)
 
-**Current release: 0.10.4** (23 Nov 2026, candidate; production runs 0.9.1). See [CHANGELOG.md](CHANGELOG.md) for every release. From v0.9.1 on, installers and checksums are attached to each tagged GitHub release.
+**Current release: 0.12.11** (23 Nov 2026, candidate; production runs 0.9.1). See [CHANGELOG.md](CHANGELOG.md) for every release. From v0.9.1 on, installers and checksums are attached to each tagged GitHub release.
 
 ## Fleet onboarding and live activity
 
