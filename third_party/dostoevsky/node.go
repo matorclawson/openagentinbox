@@ -66,19 +66,72 @@ type checkpoint struct {
 type stream struct {
 	base    int64
 	firstID string
+	first   location
+	tail    *recordTail
+	groups  map[string]Position
+	wait    *streamWait
+}
+
+type recordTail struct {
 	records []location
 	ids     map[string]int64
-	groups  map[string]Position
+}
+
+type streamWait struct {
 	changed chan struct{}
 	waiters int
+}
+
+func (s *stream) count() int64 {
+	if s.first.size == 0 {
+		return 0
+	}
+	if s.tail == nil {
+		return 1
+	}
+	return 1 + int64(len(s.tail.records))
+}
+
+func (s *stream) location(index int64) location {
+	if index == 0 {
+		return s.first
+	}
+	return s.tail.records[index-1]
+}
+
+func (s *stream) addRecord(r *Record, loc location) {
+	if s.first.size == 0 {
+		s.first, s.firstID = loc, r.ID
+		return
+	}
+	if s.tail == nil {
+		s.tail = &recordTail{}
+	}
+	s.tail.records = append(s.tail.records, loc)
+	if r.ID != "" {
+		if s.tail.ids == nil {
+			s.tail.ids = make(map[string]int64)
+		}
+		s.tail.ids[r.ID] = r.Offset
+	}
 }
 
 func (s *stream) lookupID(id string) (int64, bool) {
 	if id != "" && id == s.firstID {
 		return s.base, true
 	}
-	off, ok := s.ids[id]
+	if s.tail == nil {
+		return 0, false
+	}
+	off, ok := s.tail.ids[id]
 	return off, ok
+}
+
+func (s *stream) signal() {
+	if s.wait != nil && s.wait.changed != nil {
+		close(s.wait.changed)
+		s.wait.changed = nil
+	}
 }
 
 type Node struct {
@@ -168,10 +221,7 @@ func (n *Node) Close() error {
 	}
 	n.closed = true
 	for _, s := range n.streams {
-		if s.changed != nil {
-			close(s.changed)
-			s.changed = nil
-		}
+		s.signal()
 	}
 	return n.j.close()
 }
@@ -179,6 +229,9 @@ func (n *Node) owner(p Partition) (string, error) {
 	count := n.partitionCount(p.Topic)
 	if p.Number < 0 || p.Number >= count {
 		return "", ErrInvalid
+	}
+	if len(n.cfg.Nodes) == 1 {
+		return n.cfg.Nodes[0], nil
 	}
 	slot := uint64(p.Number)
 	if n.cfg.Topics["*"] > 0 {
@@ -201,6 +254,9 @@ func (n *Node) partition(t, key string) (Partition, error) {
 	c := n.partitionCount(t)
 	if c == 0 {
 		return Partition{}, ErrInvalid
+	}
+	if c == 1 {
+		return Partition{t, 0}, nil
 	}
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(key))
@@ -230,7 +286,7 @@ func (n *Node) index(e entry, loc location) error {
 		if err != nil {
 			return err
 		}
-		if s.base != 0 || len(s.records) != 0 || len(s.groups) != 0 || seed.Base < 0 {
+		if s.base != 0 || s.count() != 0 || len(s.groups) != 0 || seed.Base < 0 {
 			return ErrConflict
 		}
 		s.base = seed.Base
@@ -242,24 +298,11 @@ func (n *Node) index(e entry, loc location) error {
 		if err != nil {
 			return err
 		}
-		if r.Offset != s.base+int64(len(s.records)) {
+		if r.Offset != s.base+s.count() {
 			return ErrConflict
 		}
-		s.records = append(s.records, loc)
-		if r.ID != "" {
-			if len(s.records) == 1 {
-				s.firstID = r.ID
-			} else {
-				if s.ids == nil {
-					s.ids = make(map[string]int64)
-				}
-				s.ids[r.ID] = r.Offset
-			}
-		}
-		if s.changed != nil {
-			close(s.changed)
-			s.changed = nil
-		}
+		s.addRecord(r, loc)
+		s.signal()
 		return nil
 	}
 	if c := e.Check; c != nil {
@@ -271,7 +314,7 @@ func (n *Node) index(e entry, loc location) error {
 		if c.Expected != nil {
 			expected = *c.Expected
 		}
-		if expected != s.groups[c.Group].Next || c.Next <= expected || c.Next > s.base+int64(len(s.records)) {
+		if expected != s.groups[c.Group].Next || c.Next <= expected || c.Next > s.base+s.count() {
 			return ErrConflict
 		}
 		if s.groups == nil {
@@ -305,7 +348,7 @@ func (n *Node) Publish(ctx context.Context, t string, m Message) (Record, error)
 		return Record{}, e
 	}
 	if off, ok := s.lookupID(m.ID); m.ID != "" && ok {
-		ev, e := n.j.read(s.records[off-s.base])
+		ev, e := n.j.read(s.location(off - s.base))
 		if e != nil {
 			return Record{}, e
 		}
@@ -315,7 +358,7 @@ func (n *Node) Publish(ctx context.Context, t string, m Message) (Record, error)
 		}
 		return *r, nil
 	}
-	r := Record{Partition: p, Message: m, Offset: s.base + int64(len(s.records)), Time: time.Now().UTC()}
+	r := Record{Partition: p, Message: m, Offset: s.base + s.count(), Time: time.Now().UTC()}
 	ev := entry{Record: &r}
 	loc, e := n.j.append(ev)
 	if e == nil {
@@ -351,8 +394,8 @@ func (n *Node) Read(ctx context.Context, p Partition, offset int64, wait bool) (
 			n.mu.RUnlock()
 			return Record{}, ErrExpired
 		}
-		if s != nil && offset < s.base+int64(len(s.records)) {
-			ev, e := n.j.read(s.records[offset-s.base])
+		if s != nil && offset < s.base+s.count() {
+			ev, e := n.j.read(s.location(offset - s.base))
 			n.mu.RUnlock()
 			if e != nil {
 				return Record{}, e
@@ -369,27 +412,30 @@ func (n *Node) Read(ctx context.Context, p Partition, offset int64, wait bool) (
 			n.mu.Unlock()
 			return Record{}, e
 		}
-		if offset < s.base+int64(len(s.records)) {
+		if offset < s.base+s.count() {
 			n.mu.Unlock()
 			continue
 		}
-		if s.changed == nil {
-			s.changed = make(chan struct{})
+		if s.wait == nil {
+			s.wait = &streamWait{}
 		}
-		ch := s.changed
-		s.waiters++
+		if s.wait.changed == nil {
+			s.wait.changed = make(chan struct{})
+		}
+		ch := s.wait.changed
+		s.wait.waiters++
 		n.mu.Unlock()
 		select {
 		case <-ctx.Done():
 		case <-ch:
 		}
 		n.mu.Lock()
-		s.waiters--
-		if s.waiters == 0 {
-			if len(s.records) == 0 && s.base == 0 && len(s.groups) == 0 {
+		s.wait.waiters--
+		if s.wait.waiters == 0 {
+			if s.count() == 0 && s.base == 0 && len(s.groups) == 0 {
 				delete(n.streams, p)
 			}
-			s.changed = nil
+			s.wait = nil
 		}
 		n.mu.Unlock()
 	}
@@ -404,7 +450,7 @@ func (n *Node) Position(ctx context.Context, p Partition, g string) (Position, e
 	if e != nil {
 		return Position{}, e
 	}
-	if len(s.records) == 0 && s.waiters == 0 && s.base == 0 && len(s.groups) == 0 {
+	if s.count() == 0 && s.wait == nil && s.base == 0 && len(s.groups) == 0 {
 		delete(n.streams, p)
 	}
 	pos := s.groups[g]
@@ -432,8 +478,8 @@ func (n *Node) CommitBatch(ctx context.Context, p Partition, g string, offset, n
 	if e = ctx.Err(); e != nil {
 		return e
 	}
-	if s.groups[g].Next != offset || next > s.base+int64(len(s.records)) {
-		if len(s.records) == 0 && s.waiters == 0 && s.base == 0 && len(s.groups) == 0 {
+	if s.groups[g].Next != offset || next > s.base+s.count() {
+		if s.count() == 0 && s.wait == nil && s.base == 0 && len(s.groups) == 0 {
 			delete(n.streams, p)
 		}
 		return ErrConflict

@@ -1,6 +1,6 @@
 # Embedded Dostoevsky in OpenAgentInbox 0.10.2
 
-The application uses the canonical github.com/rodriveracom/dostoevsky module with an offline replacement in third_party/dostoevsky. The supplied upstream VERSION is 0.3.0 and its changelog identifies a candidate. The local v0.3.0-rc.0 requirement identifies this snapshot independently of public tags. Source archive SHA-256 is cf0ed72c1fd849b2eabcb9b95177e18a44ebfe1abf414d7060b46d5444755287. Library Go files, sketches, module metadata, tests and license come from that archive.
+The application uses the canonical github.com/rodriveracom/dostoevsky module with an offline replacement in third_party/dostoevsky. The supplied upstream VERSION is 0.3.0 and its changelog identifies a candidate. The local v0.3.0-rc.1 requirement identifies this snapshot independently of public tags. Source archive SHA-256 is d44377ab2ecd1c74cdec6f85c728af273aae9382c65324c14435d20fb37c8ece. Library Go files, sketches, module metadata, tests and license come from that archive.
 
 ## What runs in production
 

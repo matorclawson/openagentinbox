@@ -72,7 +72,7 @@ func (n *Node) PublishBatch(ctx context.Context, items []Publication) ([]Record,
 		s := n.streams[p]
 		var base int64
 		if s != nil {
-			base = s.base + int64(len(s.records))
+			base = s.base + s.count()
 		}
 		if m.ID != "" {
 			k := identity{p, m.ID}
@@ -81,7 +81,7 @@ func (n *Node) PublishBatch(ctx context.Context, items []Publication) ([]Record,
 				prior = &records[j]
 			} else if s != nil {
 				if off, ok := s.lookupID(m.ID); ok {
-					ev, e := n.j.read(s.records[off-s.base])
+					ev, e := n.j.read(s.location(off - s.base))
 					if e != nil {
 						return nil, e
 					}
@@ -99,15 +99,12 @@ func (n *Node) PublishBatch(ctx context.Context, items []Publication) ([]Record,
 		}
 		records[i] = Record{Partition: p, Message: m, Offset: base + counts[p], Time: time.Now().UTC()}
 		counts[p]++
-		frame, e := encodeFrame(entry{Record: &records[i]})
+		start := len(frames)
+		frames, e = appendEncodedFrame(frames, entry{Record: &records[i]}, maxFrame)
 		if e != nil {
 			return nil, e
 		}
-		if len(frames)+len(frame) > maxFrame {
-			return nil, ErrLimit
-		}
-		writes = append(writes, staged{i, location{n.j.end + int64(len(frames)) + 20, len(frame) - 20}})
-		frames = append(frames, frame...)
+		writes = append(writes, staged{i, location{n.j.end + int64(start) + 20, len(frames) - start - 20}})
 	}
 	if len(writes) > 0 {
 		if e := n.j.writeFrames(frames); e != nil {

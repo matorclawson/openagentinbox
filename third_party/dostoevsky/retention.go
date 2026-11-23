@@ -46,7 +46,7 @@ func (n *Node) Retain(ctx context.Context, floors map[Partition]int64) error {
 			}
 			continue
 		}
-		if floor < s.base || floor > s.base+int64(len(s.records)) {
+		if floor < s.base || floor > s.base+s.count() {
 			return ErrInvalid
 		}
 		for _, pos := range s.groups {
@@ -91,7 +91,7 @@ func (n *Node) Retain(ctx context.Context, floors map[Partition]int64) error {
 	if _, err = appendFrame(entry{Config: &n.cfg}); err != nil {
 		return err
 	}
-	newLocations := make(map[Partition][]location, len(n.streams))
+	rebuilt := make(map[Partition]*stream, len(n.streams))
 	for p, s := range n.streams {
 		if err = ctx.Err(); err != nil {
 			return err
@@ -105,11 +105,13 @@ func (n *Node) Retain(ctx context.Context, floors map[Partition]int64) error {
 				return err
 			}
 		}
-		for i := floor - s.base; i < int64(len(s.records)); i++ {
+		updated := &stream{base: floor, groups: s.groups, wait: s.wait}
+		rebuilt[p] = updated
+		for i := floor - s.base; i < s.count(); i++ {
 			if err = ctx.Err(); err != nil {
 				return err
 			}
-			ev, e := n.j.read(s.records[i])
+			ev, e := n.j.read(s.location(i))
 			if e != nil {
 				return e
 			}
@@ -117,7 +119,7 @@ func (n *Node) Retain(ctx context.Context, floors map[Partition]int64) error {
 			if e != nil {
 				return e
 			}
-			newLocations[p] = append(newLocations[p], loc)
+			updated.addRecord(ev.Record, loc)
 		}
 	}
 	if err = f.Sync(); err != nil {
@@ -134,35 +136,8 @@ func (n *Node) Retain(ctx context.Context, floors map[Partition]int64) error {
 	replacement.lock = old.lock
 	n.j = replacement
 	for p, s := range n.streams {
-		floor := s.base
-		if requested, ok := floors[p]; ok {
-			floor = requested
-		}
-		s.base = floor
-		s.records = newLocations[p]
-		s.firstID = ""
-		s.ids = nil
-		for i, loc := range s.records {
-			ev, e := replacement.read(loc)
-			if e != nil {
-				n.j.failed = e
-				break
-			}
-			if ev.Record.ID != "" {
-				if i == 0 {
-					s.firstID = ev.Record.ID
-				} else {
-					if s.ids == nil {
-						s.ids = make(map[string]int64)
-					}
-					s.ids[ev.Record.ID] = ev.Record.Offset
-				}
-			}
-		}
-		if s.changed != nil {
-			close(s.changed)
-			s.changed = nil
-		}
+		*s = *rebuilt[p]
+		s.signal()
 	}
 	closeErr := old.file.Close()
 	d, e := os.Open(dir)
