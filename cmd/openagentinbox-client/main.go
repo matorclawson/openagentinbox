@@ -211,11 +211,11 @@ func watch(ctx context.Context, path string, p profile) error {
 	return nil
 }
 
-const usage = "openagentinbox-client [--seat NAME] whoami | verify ORIGIN CURRENT_NAME [MAILBOX_ID] | use-name ORIGIN CURRENT_NAME MAILBOX_ID | bind ORIGIN --token-stdin | login ORIGIN | status ORIGIN | tickets ORIGIN DIRECTORY | join ORIGIN NAME [--ticket-stdin] | host-info ORIGIN | handshake ORIGIN DIRECTORY | inbox [BEFORE] | read ID | send TO SUBJECT BODY [UUID] | watch | notify help"
+const usage = "openagentinbox-client [--seat NAME] whoami | authorization | onboard ORIGIN [--watch|--install-worker] | verify ORIGIN CURRENT_NAME [MAILBOX_ID] | use-name ORIGIN CURRENT_NAME MAILBOX_ID | bind ORIGIN --token-stdin | login ORIGIN | status ORIGIN | tickets ORIGIN DIRECTORY | join ORIGIN NAME [--ticket-stdin] | host-info ORIGIN | handshake ORIGIN DIRECTORY | inbox [BEFORE] | read ID | send TO SUBJECT BODY [UUID] | watch | notify help"
 
 func run(ctx context.Context, args []string) error {
 	if len(args) == 1 && args[0] == "version" {
-		fmt.Println("0.8.0")
+		fmt.Println("0.9.0")
 		return nil
 	}
 	if len(args) == 0 || args[0] == "help" {
@@ -238,7 +238,7 @@ func run(ctx context.Context, args []string) error {
 		seat, args = args[1], args[2:]
 		path = filepath.Join(home, ".config/openagentinbox/seats", seat+".json")
 		switch args[0] {
-		case "notify", "whoami", "use-name", "bind", "verify", "inbox", "read", "send", "watch", "join":
+		case "authorization", "notify", "whoami", "use-name", "bind", "verify", "inbox", "read", "send", "watch", "join":
 		default:
 			return errors.New("expected a seat command")
 		}
@@ -247,6 +247,12 @@ func run(ctx context.Context, args []string) error {
 	var p profile
 	var body any
 	var route string
+	if cmd == "onboard" && len(a) == 2 && a[1] == "--install-worker" {
+		return installWorker(ctx, home, a[0])
+	}
+	if cmd == "onboard" && (len(a) == 1 || len(a) == 2 && a[1] == "--watch") {
+		return onboard(ctx, home, a[0], len(a) == 2)
+	}
 	if cmd == "login" && len(a) == 1 {
 		return login(ctx, home, a[0])
 	}
@@ -430,6 +436,8 @@ func run(ctx context.Context, args []string) error {
 			}
 			_, err = os.Stdout.Write(b)
 			return err
+		case cmd == "authorization" && len(a) == 0:
+			route = "authorization"
 		case cmd == "whoami" && len(a) == 0:
 			route = "whoami"
 		case cmd == "watch" && len(a) == 0:

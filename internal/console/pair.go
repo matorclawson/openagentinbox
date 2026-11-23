@@ -17,6 +17,11 @@ CREATE TRIGGER IF NOT EXISTS remove_cli_roster AFTER DELETE ON paired_cli
  BEGIN DELETE FROM roster WHERE host=OLD.id; END;`
 
 func (s *server) pairRoutes(add func(string, handler)) {
+	add("POST /api/desk/onboarding", s.authorizeOnboarding)
+	add("POST /api/agent/onboarding/problem", s.onboardingProblem)
+	add("POST /api/agent/onboarding/work", s.onboardingWork)
+	add("POST /api/agent/onboarding/confirm", s.confirmOnboarding)
+	add("GET /api/agent/authorization", s.seatAuthorization)
 	add("POST /api/desk/pair", s.createPair)
 	add("POST /api/desk/pair/revoke", s.revokePair)
 	add("POST /api/desk/pair/roster", s.addPairRoster)
@@ -70,7 +75,7 @@ func (s *server) createPair(_ http.ResponseWriter, r *http.Request) (any, error)
 	if _, e = tx.Exec("INSERT INTO paired_cli(id,label,code_hash,deadline) VALUES(?,'',?,?)", id, hash(code), deadline); e != nil {
 		return nil, e
 	}
-	if e = reserveNames(tx, id, s.operator, q.Names, deadline); e != nil {
+	if e = s.assignOnboarding(tx, id, q.Names, deadline); e != nil {
 		return nil, e
 	}
 	if e = tx.Commit(); e != nil {
@@ -106,6 +111,9 @@ func (s *server) exchangePair(_ http.ResponseWriter, r *http.Request) (any, erro
 		return nil, e
 	}
 	if _, e = tx.Exec("UPDATE roster SET expires=? WHERE host=?", now()+86400000, id); e != nil {
+		return nil, e
+	}
+	if _, e = tx.Exec("UPDATE onboarding SET expires=? WHERE host=?", now()+86400000, id); e != nil {
 		return nil, e
 	}
 	if _, e = tx.Exec("INSERT INTO lifecycle(kind,name) VALUES('CLI paired',?)", label); e != nil {

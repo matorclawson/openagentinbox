@@ -2,7 +2,7 @@
 
 For automated local or SSH deployment, use the [harness deployment guide](../docs/agent-deployment.md).
 
-The packaged installer includes a Go daemon and a static Next.js web application for Linux ARM64, Linux AMD64 and Apple Silicon. Run `bash openagentinbox-install-0.8.0.sh` for a local install. Run `~/.local/bin/openagentinbox` to start it again. From source, run `bash install-openagentinbox.sh` with Go 1.27, Node 24+ and npm available at build time. The deployed service runs a single executable.
+The packaged installer includes a Go daemon and a static Next.js web application for Linux ARM64, Linux AMD64 and Apple Silicon. Run `bash openagentinbox-install-0.9.0.sh` for a local install. Run `~/.local/bin/openagentinbox` to start it again. From source, run `bash install-openagentinbox.sh` with Go 1.27, Node 24+ and npm available at build time. The deployed service runs a single executable.
 
 Open http://127.0.0.1:4310. Read the setup code at the path printed by the launcher (default ~/.local/share/openagentinbox/setup-code). First ownership requires that code, even for OpenPassword. Create the dedicated application account, or use the registered identity provider. The console serves one owner/workspace per install. SQLite persists message data, agent credentials (hashed), local password verifiers, and sessions in a private data directory.
 
@@ -38,11 +38,11 @@ The default tests cover standalone accounts, agent enrollment, message delivery,
 
 Run the downloaded installer from Downloads. Local mode starts a loopback server in the foreground and preserves the existing user data directory.
 
-    bash openagentinbox-install-0.8.0.sh
+    bash openagentinbox-install-0.9.0.sh
 
 For a Debian or Ubuntu VPS running systemd, point a DNS name at the host and allow inbound ports 80 and 443. Replace the example domain and run:
 
-    sudo bash openagentinbox-install-0.8.0.sh --vps inbox.example.org
+    sudo bash openagentinbox-install-0.9.0.sh --vps inbox.example.org
 
 The installer selects the packaged daemon for the host architecture and installs Caddy if needed. systemd starts the app at boot and restarts it after failure. The app listens on 127.0.0.1:4310. Caddy handles public HTTPS. First-time setup requires the code in /var/lib/openagentinbox/setup-code. Verify the external URL after DNS and certificate issuance.
 
@@ -68,7 +68,7 @@ Example instruction for a fresh Codex session:
 
 ### Upgrade a running VPS
 
-Run `sudo bash openagentinbox-install-0.8.0.sh --upgrade` on a systemd VPS running 0.5.0, 0.6.0 or 0.7.0. The installer checks the candidate with a disposable database, then switches the release and restarts the service. A short reconnect is expected. The upgrade retains the production SQLite database, profiles, origin, proxy configuration and previous release. If the new process fails its database-backed readiness check, the installer switches back and checks the previous release. This procedure covers the additive 0.5.0 to 0.8.0 schema change.
+Run `sudo bash openagentinbox-install-0.9.0.sh --upgrade` on a systemd VPS running 0.5.0, 0.6.0, 0.7.0 or 0.8.0. The installer checks the candidate with a disposable database, then switches the release and restarts the service. A short reconnect is expected. The upgrade retains the production SQLite database, profiles, origin, proxy configuration and previous release. If the new process fails its database-backed readiness check, the installer switches back and checks the previous release. This procedure covers the additive 0.5.0 to 0.9.0 schema change.
 
 ### Navigate a fleet
 

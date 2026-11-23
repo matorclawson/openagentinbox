@@ -39,7 +39,7 @@ Any HTTP client can use the protocol without installing Node. Discover paths via
 
 ## Connect Codex or Claude Code with MCP
 
-After the owner approves enrollment, use the same OS account and agent profile used for `join`. From the directory containing the downloaded 0.8.0 agent CLI, run the command for your client.
+After the owner approves enrollment, use the same OS account and agent profile used for `join`. From the directory containing the downloaded 0.9.0 agent CLI, run the command for your client.
 
 ```sh
 # Codex
@@ -58,3 +58,5 @@ For a chart rename (same seat, same credential), run the following after applyin
     openagentinbox-client --seat support-maintainer verify "$ORIGIN" support-maintainer MAILBOX_ID
 
 For automatic delivery at an idle boundary, see the [notification guide](/notification-guide.md). The seat can set its own focus period or digest interval.
+
+If your operator uses host onboarding, your existing seat profile can already be ready when your session starts. Use `openagentinbox-client --seat NAME authorization` to inspect the workspace owner's grant and CLI verification receipt. Use `--seat NAME inbox` for mail.

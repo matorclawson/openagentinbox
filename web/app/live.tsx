@@ -10,6 +10,7 @@ export type Live = {
   agents: [string,number,string][];
   activity: [string,string,number][];
   mail: [string,string,string,string,string][];
+  onboarding: [string,string,string,number,number,string][];
   clients: [string,string,number,number,number][];
   roster: [string,number,number,string,string][];
 };
@@ -90,19 +91,21 @@ function ClientPairing({data}:{data:Live}){
  <h2>Pair a CLI</h2><p>Connect a client to this workspace. You choose which agent names it can provision.</p>
  <form onSubmit={e=>{e.preventDefault();void act(async()=>{
   const roster=names.trim()?names.trim().split(/[\s,]+/):[];
-  if(target){await post("pair/roster",{id:target,names:roster});setMessage("Agent names authorized. Run tickets on the paired client.")}
+  if(target){await post("onboarding",{id:target,names:roster});setMessage("Onboarding authorized. The host worker can now enroll new seats and verify existing profiles.")}
   else{setPair(await post("pair",{names:roster}))}
   setNames("");
  })}}>
- {paired.length>0&&<label>Client<select value={target} onChange={e=>setTarget(e.target.value)}><option value="">Pair a new CLI</option>{paired.map(([id,label])=><option key={id} value={id}>{label} · {id.slice(-6)}</option>)}</select></label>}
+ {paired.length>0&&<label>Client<select aria-label="Paired client" value={target} onChange={e=>setTarget(e.target.value)}><option value="">Pair a new CLI</option>{paired.map(([id,label])=><option key={id} value={id}>{label} · {id.slice(-6)}</option>)}</select></label>}
  <label>Agent names {target?"":"(optional)"}<textarea required={Boolean(target)} value={names} onChange={e=>setNames(e.target.value)} placeholder="architect, openpassword, researcher"/></label>
- <button className="primary" disabled={busy||(!target&&Boolean(pair))}>{target?"Authorize agent names":"Generate pairing token"}</button>
+ <button className="primary" disabled={busy||(!target&&Boolean(pair))}>{target?"Authorize onboarding":"Generate pairing token"}</button>
  </form>
  {pair&&<div className="pair-code"><strong>Paste this token at the CLI prompt</strong>
  <code>openagentinbox-client login {window.location.origin}</code>
  <label>Pairing token<input readOnly value={pair.code} onFocus={e=>e.target.select()}/></label>
  <button onClick={()=>void act(async()=>{await navigator.clipboard.writeText(pair.code);setMessage("Token copied.")})}>Copy token</button>
  <small>Single use · expires at {new Date(pair.expires).toLocaleTimeString()}</small></div>}
+ {target&&<p>Authorize this paired host to enroll missing inboxes and verify existing seat profiles. Start its worker once under the account that owns those profiles: <code>openagentinbox-client onboard {window.location.origin} --install-worker</code></p>}
+ {data.onboarding?.length>0&&<details className="card detail" open><summary>Onboarding status</summary>{data.onboarding.map(([name,host,owner,at,expires,problem],i)=><div key={i}><strong>{name}</strong> · {host} · authorized by {owner} · {at?"CLI verified "+new Date(at).toLocaleString():expires<=Date.now()?"Authorization expired":problem||"Awaiting host"}</div>)}</details>}
  {data.clients.map(([id,label,expires,at,remaining])=><div className="agentrow" key={id}><strong>{at?label:"Awaiting CLI login"}</strong><small>{at?"Paired · "+id.slice(-6)+" · "+remaining+" unclaimed":"Expires "+new Date(expires).toLocaleTimeString()}</small><button disabled={busy} onClick={()=>void act(async()=>{await post("pair/revoke",{id});if(pair?.id===id)setPair(null);if(target===id)setTarget("");setMessage(at?"CLI revoked.":"Pairing canceled.")})}>{at?"Revoke CLI":"Cancel pairing"}</button></div>)}
  {message&&<p role="status">{message}</p>}<a href="/host-guide.md">Install the CLI and onboard a fleet</a>
  </section>

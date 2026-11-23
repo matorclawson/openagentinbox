@@ -173,12 +173,13 @@ func (s *server) workspace(_ http.ResponseWriter, r *http.Request) (any, error) 
 	data := object{"cursor": cursor, "peerLimit": s.peerLimit, "watching": s.live.watchers()}
 	// Array-valued queries keep the wire format stable for an empty workspace.
 	for key, query := range map[string]string{
-		"clients":  "SELECT id,label,deadline,coalesce(paired_at,0),(SELECT count(*) FROM roster WHERE host=paired_cli.id AND expires>?1) FROM paired_cli WHERE paired_at IS NOT NULL OR deadline>?1 ORDER BY rowid DESC",
-		"pending":  "SELECT name,code,expires,peer FROM enrollments WHERE expires>?1 ORDER BY expires,code",
-		"agents":   "SELECT address,key IS NOT NULL,box FROM agents JOIN addresses ON box=name AND current=1 ORDER BY address",
-		"activity": "SELECT kind,name,at FROM lifecycle ORDER BY id DESC LIMIT 12",
-		"mail":     "SELECT m.subject,m.sender,d.seat,m.created_text,m.id FROM messages m JOIN deliveries d USING(seq) ORDER BY m.seq DESC LIMIT 8",
-		"roster":   "SELECT substr(host,instr(host,'/')+1),count(*),min(expires),host,coalesce((SELECT ip FROM roster_binding b WHERE b.host=roster.host),'Reauthorize roster') FROM roster WHERE host NOT LIKE 'cli:%' AND expires>?1 GROUP BY host ORDER BY host",
+		"onboarding": "SELECT o.name,c.label,o.owner,o.verified,o.expires,o.problem FROM onboarding o JOIN paired_cli c ON c.id=o.host ORDER BY o.issued DESC,o.name LIMIT 512",
+		"clients":    "SELECT id,label,deadline,coalesce(paired_at,0),(SELECT count(*) FROM roster WHERE host=paired_cli.id AND expires>?1) FROM paired_cli WHERE paired_at IS NOT NULL OR deadline>?1 ORDER BY rowid DESC",
+		"pending":    "SELECT name,code,expires,peer FROM enrollments WHERE expires>?1 ORDER BY expires,code",
+		"agents":     "SELECT address,key IS NOT NULL,box FROM agents JOIN addresses ON box=name AND current=1 ORDER BY address",
+		"activity":   "SELECT kind,name,at FROM lifecycle ORDER BY id DESC LIMIT 12",
+		"mail":       "SELECT m.subject,m.sender,d.seat,m.created_text,m.id FROM messages m JOIN deliveries d USING(seq) ORDER BY m.seq DESC LIMIT 8",
+		"roster":     "SELECT substr(host,instr(host,'/')+1),count(*),min(expires),host,coalesce((SELECT ip FROM roster_binding b WHERE b.host=roster.host),'Reauthorize roster') FROM roster WHERE host NOT LIKE 'cli:%' AND expires>?1 GROUP BY host ORDER BY host",
 	} {
 		var args []any
 		if key == "pending" || key == "roster" || key == "clients" {
