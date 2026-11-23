@@ -27,7 +27,7 @@ type Row = {
   src: string;
   dst: string;
   subject: string;
-  at: string;
+  at: string; opened?: number; replied?: number; state?: string; due?: number;
 };
 async function api(path: string, body?: object) {
   const r = await fetch("/api/" + path, {
@@ -130,7 +130,7 @@ export default function Home() {
     [error, warn] = useState(""),
     [notice, say] = useState(""),
     [credential, key] = useState("");
-  const [draft, write] = useState({ to: "", subject: "", body: "", key: "" });
+  const [draft, write] = useState({ to: "", subject: "", body: "", key: "",intent:"fyi",replyTo:"" });
   const [pending, setPending] = useState<{ name: string; code: string } | null>(
     null,
   );
@@ -227,6 +227,14 @@ export default function Home() {
     }).catch(e => { if (active) warn(e.message); });
     return () => { active = false; };
   }, [messageId, acc, s?.name]);
+  useEffect(()=>{
+    if (!messageId || !live?.cursor || !s?.name) return;
+    let active=true;
+    void api("desk/receipt/"+messageId).then(receipt=>{
+      if(active)select(old=>old && encodeURIComponent(old.row.id)===messageId?{...old,row:{...old.row,...receipt}}:old);
+    }).catch(()=>{});
+    return ()=>{active=false};
+  },[live?.cursor,messageId,s?.name]);
   function navigate(to: string, replace = false) {
     if (replace) history.replaceState(null, "", to);
     else if (location.pathname !== to) history.pushState({from:location.pathname}, "", to);
@@ -245,9 +253,9 @@ export default function Home() {
     await navigator.clipboard.writeText(value);
     say(success);
   }
-  function compose(to = "", subject = "") {
+  function compose(to = "", subject = "", replyTo="") {
     go("compose");
-    write({ to, subject, body: "", key: crypto.randomUUID() });
+    write({ to, subject, body: "", key: crypto.randomUUID(),intent:"fyi",replyTo });
   }
   async function connect(code = "") {
     const r = await api("connect", { code });
@@ -445,6 +453,10 @@ export default function Home() {
                   {new Date(selected.row.at).toLocaleString()}
                 </p>
                 <pre>{selected.body}</pre>
+                <p>Opened by recipient · {selected.row.opened?new Date(selected.row.opened).toLocaleString():"No recorded open"}<br/>First linked reply · {selected.row.replied?new Date(selected.row.replied).toLocaleString():"No recorded reply"}</p>
+                {selected.row.state&&selected.row.state!=="fyi"&&<p>Request · {selected.row.state}{selected.row.due?" · Due "+new Date(selected.row.due).toLocaleString():""}</p>}
+                {selected.row.dst===acc.operator && ["pending","accepted","deferred"].includes(selected.row.state??"")&&<form onSubmit={e=>{e.preventDefault();const fields=new FormData(e.currentTarget);void task(async()=>{const until=String(fields.get("until")||"");await api("desk/request",{id:selected.row.id,action:fields.get("action"),until:until?new Date(until).getTime():0});const row=await api("desk/message/"+messageId);select({row,body:row.body})})}}>
+                <label>Request action<select name="action"><option value="accept">Accept</option><option value="defer">Defer until</option><option value="resolve">Resolve</option><option value="decline">Decline</option></select></label><label>Next update (local time)<input type="datetime-local" name="until"/></label><button>Update request</button></form>}
                 <div className="reference"><code>{selected.row.id}</code>
                   <button onClick={()=>void task(()=>copy(selected.row.id,"Message ID copied."))}>Copy message ID</button>
                   <button onClick={()=>void task(()=>copy(location.href,"Message link copied."))}>Copy link</button>
@@ -460,7 +472,7 @@ export default function Home() {
                 {selected.row.src !== acc.operator && (
                   <button
                     onClick={() =>
-                      compose(selected.row.src, "Re: " + selected.row.subject)
+                      compose(selected.row.src, "Re: " + selected.row.subject, selected.row.dst===acc.operator?selected.row.id:"")
                     }
                   >
                     <PenLine size={16} />
@@ -495,6 +507,7 @@ export default function Home() {
                     placeholder="Agent or operator name"
                   />
                 </label>
+                <label>Message intent<select value={draft.intent} onChange={e=>write({...draft,intent:e.target.value})}><option value="fyi">FYI</option><option value="request">Request · pickup in 15 minutes</option><option value="urgent">Urgent request · pickup in 2 minutes</option></select></label>
                 <datalist id="seats">
                   {[acc.operator, ...agentNames].map((n) => (
                     <option key={n}>{n}</option>

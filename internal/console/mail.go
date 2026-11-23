@@ -21,6 +21,9 @@ func (s *server) mailRoutes(add func(string, handler)) {
 	}
 	for _, a := range []string{"desk", "agent"} {
 		add("POST /api/"+a+"/send", s.send)
+		add("GET /api/"+a+"/receipt/{id}", s.receipt)
+		add("POST /api/"+a+"/request", s.requestAction)
+		add("GET /api/"+a+"/alerts", s.alerts)
 		add("GET /api/"+a+"/message/{id}", s.detail)
 	}
 	add("POST /api/desk/message/{id}/share", s.shareMessage)
@@ -119,7 +122,7 @@ func (s *server) send(_ http.ResponseWriter, r *http.Request) (any, error) {
 	if e != nil {
 		return nil, e
 	}
-	var q struct{ To, Subject, Body, Key string }
+	var q struct{ To, Subject, Body, Key, Intent, ReplyTo string }
 	if e = input(r, &q); e != nil {
 		return nil, e
 	}
@@ -134,7 +137,42 @@ func (s *server) send(_ http.ResponseWriter, r *http.Request) (any, error) {
 			return nil, e
 		}
 	}
-	id, e := s.store.AcceptContext(r.Context(), "console/"+src+"/"+q.Key, deliverystore.Message{ID: uuid.NewString(), Sender: src, Subject: q.Subject, Recipients: []string{q.To}, Priority: 1, Body: []byte(q.Body)}, time.Now())
+	priority := 1
+	switch q.Intent {
+	case "", "fyi":
+		q.Intent = ""
+	case "request":
+	case "urgent":
+		priority = 0
+	default:
+		return nil, failure{400, "Unknown intent"}
+	}
+	timestamp := time.Now()
+	msg := deliverystore.Message{ID: uuid.NewString(), Sender: src, Subject: q.Subject, Recipients: []string{q.To}, Priority: priority, Intent: q.Intent, ParentID: q.ReplyTo, Body: []byte(q.Body)}
+	id, e := s.store.AcceptWithReceipt(r.Context(), "console/"+src+"/"+q.Key, msg, timestamp, func(tx *sql.Tx) error {
+		if q.ReplyTo != "" {
+			var parent string
+			if err := tx.QueryRow("SELECT m.sender FROM messages m JOIN deliveries d USING(seq) WHERE m.id=? AND d.seat=?", q.ReplyTo, src).Scan(&parent); err != nil {
+				return err
+			}
+			if parent != q.To {
+				return failure{400, "Reply must go to the original sender"}
+			}
+			_, err := tx.Exec(`INSERT INTO mail_receipts(id,seat,replied) VALUES(?,?,?) ON CONFLICT(id,seat) DO UPDATE SET replied=coalesce(replied,excluded.replied),state=CASE WHEN state='fyi' THEN state ELSE 'resolved' END,due=NULL`, q.ReplyTo, src, timestamp.UnixMilli())
+			if err != nil {
+				return err
+			}
+		}
+		if q.Intent == "" {
+			return nil
+		}
+		delay := 15 * time.Minute
+		if priority == 0 {
+			delay = 2 * time.Minute
+		}
+		_, err := tx.Exec("INSERT INTO mail_receipts(id,seat,state,due) VALUES(?,?,'pending',?)", msg.ID, q.To, timestamp.Add(delay).UnixMilli())
+		return err
+	})
 	if errors.Is(e, deliverystore.ErrConflict) {
 		return nil, failure{409, "Request key already used for different content"}
 	}
@@ -221,7 +259,25 @@ func (s *server) detail(_ http.ResponseWriter, r *http.Request) (any, error) {
 		args = append(args, actor, actor)
 	}
 	e = s.db.QueryRowContext(r.Context(), query, args...).Scan(&src, &dst, &sub, &body, &at)
-	return object{"id": id, "src": src, "dst": dst, "subject": sub, "body": body, "at": at}, e
+	if e != nil {
+		return nil, e
+	}
+	if actor == dst {
+		res, err := s.db.ExecContext(r.Context(), `INSERT INTO mail_receipts(id,seat,opened) VALUES(?,?,?) ON CONFLICT(id,seat) DO UPDATE SET opened=excluded.opened WHERE opened IS NULL`, id, dst, now())
+		if err != nil {
+			return nil, err
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			s.live.signal()
+		}
+	}
+	var opened, replied, due int64
+	state := "fyi"
+	e = s.db.QueryRowContext(r.Context(), "SELECT coalesce(opened,0),coalesce(replied,0),state,coalesce(due,0) FROM mail_receipts WHERE id=? AND seat=?", id, dst).Scan(&opened, &replied, &state, &due)
+	if e != nil && !errors.Is(e, sql.ErrNoRows) {
+		return nil, e
+	}
+	return object{"id": id, "src": src, "dst": dst, "subject": sub, "body": body, "at": at, "opened": opened, "replied": replied, "state": state, "due": due}, nil
 }
 
 func (s *server) shareMessage(_ http.ResponseWriter, r *http.Request) (any, error) {

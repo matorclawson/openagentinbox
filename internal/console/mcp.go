@@ -17,7 +17,10 @@ var agentTools = []map[string]any{
 	mcprpc.Tool("whoami", "Show the enrolled inbox name.", object{}, []string{}),
 	mcprpc.Tool("inbox", "List incoming messages, newest first. Pass the next cursor as before.", object{"before": textField}, []string{}),
 	mcprpc.Tool("read", "Read a message addressed to this inbox.", object{"id": textField}, []string{"id"}),
-	mcprpc.Tool("send", "Send a message. Reuse the same UUID key when retrying.", object{"to": textField, "subject": textField, "body": textField, "key": textField}, []string{"to", "subject", "body", "key"}),
+	mcprpc.Tool("send", "Send a message. Reuse the same UUID key when retrying.", object{"to": textField, "subject": textField, "body": textField, "key": textField, "intent": textField, "replyTo": textField}, []string{"to", "subject", "body", "key"}),
+	mcprpc.Tool("receipt", "Inspect a sent or received message without opening it.", object{"id": textField}, []string{"id"}),
+	mcprpc.Tool("request", "Accept, defer, resolve or decline a received request. Until is Unix milliseconds.", object{"id": textField, "action": textField, "until": object{"type": "integer"}}, []string{"id", "action"}),
+	mcprpc.Tool("alerts", "List outstanding escalations for this mailbox.", object{}, []string{}),
 }
 var agentToolNames = func() map[string]bool {
 	v := map[string]bool{}
@@ -71,7 +74,7 @@ func (s *server) mcp(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(202)
 		return
 	}
-	reply := mcprpc.Dispatch(q, "0.9.2", agentTools, agentToolNames, func(p mcprpc.Call) any {
+	reply := mcprpc.Dispatch(q, "0.10.0", agentTools, agentToolNames, func(p mcprpc.Call) any {
 		result, e := s.agentTool(r, actor, p)
 		var text string
 		if e == nil {
@@ -127,6 +130,21 @@ func (s *server) agentTool(r *http.Request, actor string, p mcprpc.Call) (any, e
 		req.URL.Path = "/api/agent/message/" + args.ID
 		req.SetPathValue("id", args.ID)
 		return s.detail(nil, req)
+	case "receipt":
+		var args struct{ ID string }
+		if mcprpc.Decode(raw, &args) != nil || args.ID == "" {
+			return nil, bad
+		}
+		req.URL.Path = "/api/agent/receipt"
+		req.SetPathValue("id", args.ID)
+		return s.receipt(nil, req)
+	case "alerts":
+		req.URL.Path = "/api/agent/alerts"
+		return s.alerts(nil, req)
+	case "request":
+		req.URL.Path = "/api/agent/request"
+		req.Body = io.NopCloser(bytes.NewReader(raw))
+		return s.requestAction(nil, req)
 	case "send":
 		req.URL.Path = "/api/agent/send"
 		req.Body = io.NopCloser(bytes.NewReader(raw))

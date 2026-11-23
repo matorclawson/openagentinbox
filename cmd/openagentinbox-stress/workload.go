@@ -171,6 +171,9 @@ func (b *bench) work(i int, scheduled, end time.Time, body string, m *metrics) e
 	src, dst := b.route(i)
 	subject := fmt.Sprintf("load-%d", i)
 	payload := map[string]string{"to": name(dst), "key": key(i), "subject": subject, "body": body}
+	if b.Scenario == "requests" {
+		payload["intent"] = "request"
+	}
 	var id struct{ ID string }
 	start := time.Now()
 	if e := b.api(b.keys[src], "/api/agent/send", payload, &id); e != nil {
@@ -212,6 +215,24 @@ func (b *bench) work(i int, scheduled, end time.Time, body string, m *metrics) e
 		return errors.New("read mismatch")
 	}
 	m.observe("read", time.Since(start))
+	if b.Scenario == "requests" {
+		start = time.Now()
+		var state struct{ State string }
+		if err := b.api(b.keys[dst], "/api/agent/request", map[string]string{"id": id.ID, "action": "resolve"}, &state); err != nil {
+			return err
+		}
+		var receipt struct {
+			Opened int64
+			State  string
+		}
+		if err := b.api(b.keys[src], "/api/agent/receipt/"+id.ID, nil, &receipt); err != nil {
+			return err
+		}
+		if receipt.Opened <= 0 || receipt.State != "resolved" {
+			return errors.New("receipt mismatch")
+		}
+		m.observe("resolve_and_check", time.Since(start))
+	}
 	if i%4 == 0 {
 		var page struct{ Rows []struct{ ID string } }
 		start = time.Now()

@@ -12,7 +12,7 @@ import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
 const usage =
-  "join ORIGIN NAME | inbox [before] | read ID | send TO SUBJECT BODY [UUID] | mcp";
+  "join ORIGIN NAME | inbox [before] | read ID | send|request|urgent TO SUBJECT BODY [UUID] | reply ID TO SUBJECT BODY [UUID] | receipt ID | alerts | request-action ACTION ID [RFC3339] | mcp";
 const [cmd, ...args] = process.argv.slice(2);
 const config =
   process.env.OPENAGENTINBOX_PROFILE ||
@@ -59,7 +59,7 @@ async function create(url, name) {
   return profile();
 }
 async function run() {
-  if (!["join", "inbox", "read", "send", "mcp"].includes(cmd)) throw Error(usage);
+  if (!["join", "inbox", "read", "send","request","urgent","reply","receipt","alerts","request-action", "mcp"].includes(cmd)) throw Error(usage);
   let p;
   if (cmd === "join") {
     if (args.length !== 2 || !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(args[1]))
@@ -121,10 +121,18 @@ async function run() {
     );
   if (cmd === "read" && args.length === 1)
     return api("message/" + encodeURIComponent(args[0]));
-  if (cmd === "send" && (args.length === 3 || args.length === 4)) {
+  if(cmd==="receipt" && args.length===1)return api("receipt/"+encodeURIComponent(args[0]));
+  if(cmd==="alerts" && !args.length)return api("alerts");
+  if(cmd==="request-action" && (args.length===2||args.length===3)){
+    const until=args[2]?Date.parse(args[2]):0;
+    if(!Number.isFinite(until))throw Error("Supply an RFC3339 deadline");
+    return api("request",{action:args[0],id:args[1],until});
+  }
+  const replyTo=cmd==="reply"?args.shift():"";
+  if (["send","request","urgent","reply"].includes(cmd) && (args.length === 3 || args.length === 4)) {
     const key = args[3] || randomUUID();
     console.error("Retry key: " + key);
-    return api("send", { to: args[0], subject: args[1], body: args[2], key });
+    return api("send", { to: args[0], subject: args[1], body: args[2], key, replyTo, intent:cmd==="urgent"||cmd==="request"?cmd:"fyi" });
   }
   throw Error(usage);
 }

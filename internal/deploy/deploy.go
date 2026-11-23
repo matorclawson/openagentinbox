@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-const Version = "0.9.2"
+const Version = "0.10.0"
 
 type report map[string]any
 type options struct {

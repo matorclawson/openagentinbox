@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import { Activity, ArrowUpRight, Mail, Radio, UserRoundPlus, Users } from "lucide-react";
 
 export type Live = {
+  probes?:[string,number,number,number,string][];
+  overdue?:[string,string,number,string][];
+  listeners?:[string,number,string][];
   cursor: string;
   peerLimit: number;
   watching: Record<string,boolean>;
@@ -54,6 +57,10 @@ export function Workspace({data,connection,review,openBox}:{data:Live|null;conne
     <button onClick={review}><UserRoundPlus/><span>Awaiting approval</span><strong>{data?.pending.length??"—"}</strong><ArrowUpRight size={14}/></button>
     <div><Activity/><span>Listening clients</span><strong>{data?Object.keys(data.watching).length:"—"}</strong></div>
    </div>
+   <section className="stream"><h2>Delivery health</h2>
+   {data?.probes?.length?data.probes.map(([host,last,incident,count,id])=><p key={id}><strong>{host}</strong> · {incident?"Delivery check overdue":last?"Delivery verified":"Awaiting first check"} · {count} verified seats{last?" · Last check "+new Date(last).toLocaleTimeString():""}</p>):<p>No paired hosts reporting yet.</p>}
+   <details><summary>Seat listener checks</summary>{data?.listeners?.map(([seat,at,mode])=><p key={seat}>{seat} · {!at?"No listener check recorded":Date.now()-at>180000?"Check overdue":mode} · {at?new Date(at).toLocaleTimeString():"—"}</p>)}</details>
+   <h2>Overdue requests</h2>{data?.overdue?.length?data.overdue.map(([id,seat,due,state])=><p key={id}><a href={"/messages/"+encodeURIComponent(id)}>{seat} · {state}</a> · Due {new Date(due).toLocaleString()}</p>):<p>No overdue requests.</p>}</section>
    <details className="stream" open><summary>Recent activity</summary><ol>{feed.slice(0,5).map((v,i)=><li key={v.at+"-"+i}>{v.mail?<Mail size={16}/>:<Users size={16}/>}<div>{v.mail?<button onClick={()=>openBox(v.box)}>{v.title}</button>:<b>{v.title}</b>}<small>{v.detail}</small></div><time title={new Date(v.at).toLocaleString()}>{new Date(v.at).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</time></li>)}</ol>{!feed.length&&<p>{data?"Activity will appear when someone joins or sends mail.":"Connecting to your workspace…"}</p>}</details>
  </section>
 }

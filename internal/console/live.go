@@ -173,6 +173,9 @@ func (s *server) workspace(_ http.ResponseWriter, r *http.Request) (any, error) 
 	data := object{"cursor": cursor, "peerLimit": s.peerLimit, "watching": s.live.watchers()}
 	// Array-valued queries keep the wire format stable for an empty workspace.
 	for key, query := range map[string]string{
+		"probes":     "SELECT c.label,p.confirmed,p.incident,(SELECT count(*) FROM onboarding WHERE host=c.id AND verified>0),c.id FROM host_probes p JOIN paired_cli c ON c.id=p.host ORDER BY p.incident DESC,c.label LIMIT 512",
+		"listeners":  "SELECT a.name,coalesce(l.at,0),coalesce(l.mode,'unknown') FROM agents a LEFT JOIN listener_checks l ON a.name=l.seat WHERE a.key IS NOT NULL ORDER BY a.name LIMIT 512",
+		"overdue":    "SELECT r.id,r.seat,r.due,r.state FROM mail_receipts r WHERE r.due IS NOT NULL AND r.escalated=r.due ORDER BY r.due LIMIT 100",
 		"onboarding": "SELECT o.name,c.label,o.owner,o.verified,o.expires,o.problem,o.host FROM onboarding o JOIN paired_cli c ON c.id=o.host ORDER BY o.issued DESC,o.name LIMIT 512",
 		"clients":    "SELECT id,label,deadline,coalesce(paired_at,0),(SELECT count(*) FROM roster WHERE host=paired_cli.id AND expires>?1) FROM paired_cli WHERE paired_at IS NOT NULL OR deadline>?1 ORDER BY rowid DESC",
 		"pending":    "SELECT name,code,expires,peer FROM enrollments WHERE expires>?1 ORDER BY expires,code",

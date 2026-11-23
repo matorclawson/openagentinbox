@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {spawnSync} from "node:child_process";
+import {spawn,spawnSync} from "node:child_process";
 import {mkdtempSync,readFileSync,writeFileSync,mkdirSync,existsSync,rmSync,readdirSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join,resolve} from "node:path";
@@ -33,6 +33,17 @@ test("paired host reconciles a mixed 73-seat roster using direct owner authority
     const units=join(dir,".config/systemd/user"),files=readdirSync(units);
     assert.equal(files.length,1);assert.ok(readFileSync(join(units,files[0]),"utf8").includes('onboard "'+a.base+'" --watch'));
   }
+  const watcher=spawn(cli,["onboard",a.base,"--watch"],{env:{...process.env,HOME:dir},stdio:"ignore"});
+  try{
+    let confirmed=false;
+    for(let i=0;i<90;i++){
+      const live=(await a.inject({url:"/api/desk/live",headers:owner})).json();
+      if(live.probes?.some((p:any[])=>p[4]===pair.id&&p[1]>0&&p[2]===0)){confirmed=true;break}
+      await new Promise(r=>setTimeout(r,200));
+    }
+    assert.ok(confirmed,"native host must fetch and confirm a probe without a harness");
+    assert.equal((await a.inject({url:"/api/desk/list",headers:owner})).json().rows.length,0);
+  }finally{if(watcher.exitCode===null&&watcher.signalCode===null){const stopped=new Promise(r=>watcher.once("exit",r));watcher.kill();await stopped}}
   const auth={authorization:"Bearer "+existing};
   assert.equal((await post("/api/desk/onboarding",{id:pair.id,names},auth)).statusCode,401);
   assert.equal((await post("/api/desk/onboarding",{id:pair.id,names},owner)).json().authorized,73);

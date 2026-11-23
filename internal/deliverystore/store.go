@@ -106,6 +106,7 @@ func OpenMirror(path string) (*Store, error) { return openStore(path, false) }
 func openStore(path string, reliable bool) (*Store, error) {
 	// Configure EVERY connection, including replacements after a cancelled query.
 	q := url.Values{}
+	q.Set("_txlock", "immediate")
 	for _, pragma := range []string{"busy_timeout(5000)", "synchronous(FULL)", "foreign_keys(ON)", "fullfsync(ON)", "checkpoint_fullfsync(ON)", "cache_size(-16384)", "mmap_size(0)", "temp_store(FILE)", "wal_autocheckpoint(256)"} {
 		q.Add("_pragma", pragma)
 	}
@@ -136,6 +137,7 @@ func openStore(path string, reliable bool) (*Store, error) {
 		return nil, err
 	}
 	if path != ":memory:" {
+		q.Del("_txlock")
 		q.Add("mode", "ro")
 		q.Add("_pragma", "query_only(ON)")
 		u.RawQuery = q.Encode()
@@ -304,6 +306,7 @@ func (s *Store) Sender(id string) (string, bool, error) {
 
 type Message struct {
 	ID, Sender, ConversationID, ParentID, Subject string
+	Intent                                        string
 	Priority                                      int
 	Final                                         bool // the sender expects no answer: never owed
 	Recipients                                    []string
@@ -326,6 +329,9 @@ func digest(m Message) []byte {
 	if m.Final { // only when set, so the digest of every message accepted before the field existed is unchanged
 		field([]byte("final"))
 	}
+	if m.Intent != "" {
+		field([]byte("intent/" + m.Intent))
+	}
 	return h.Sum(nil)
 }
 
@@ -337,6 +343,11 @@ func (s *Store) Accept(opKey string, m Message, now time.Time) (string, error) {
 
 // AcceptContext is Accept with cancellation while waiting for storage or executing SQL.
 func (s *Store) AcceptContext(ctx context.Context, opKey string, m Message, now time.Time) (string, error) {
+	return s.AcceptWithReceipt(ctx, opKey, m, now, nil)
+}
+
+// AcceptWithReceipt atomically applies delivery-specific bookkeeping on first insertion.
+func (s *Store) AcceptWithReceipt(ctx context.Context, opKey string, m Message, now time.Time, record func(*sql.Tx) error) (string, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return "", err
@@ -348,6 +359,11 @@ func (s *Store) AcceptContext(ctx context.Context, opKey string, m Message, now 
 	}
 	if !inserted {
 		return id, nil
+	}
+	if record != nil {
+		if err = record(tx); err != nil {
+			return "", err
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return "", err

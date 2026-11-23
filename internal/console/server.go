@@ -147,14 +147,14 @@ func Run() error {
 		return e
 	}
 	defer s.store.Close()
-	u := url.URL{Scheme: "file", Path: p, RawQuery: "_pragma=busy_timeout(5000)"}
+	u := url.URL{Scheme: "file", Path: p, RawQuery: "_pragma=busy_timeout(5000)&_txlock=immediate"}
 	s.db, e = sql.Open("sqlite", u.String())
 	if e != nil {
 		return e
 	}
 	defer s.db.Close()
 	s.db.SetMaxOpenConns(1)
-	if _, e = s.db.Exec(schema + liveSchema + pairSchema + addressSchema + onboardingSchema); e != nil {
+	if _, e = s.db.Exec(schema + liveSchema + pairSchema + addressSchema + onboardingSchema + trackingSchema); e != nil {
 		return e
 	}
 	if e = s.store.UpgradeConsole(context.Background()); e != nil {
@@ -202,7 +202,7 @@ func Run() error {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		json.NewEncoder(w).Encode(object{"product": "openagentinbox", "version": "0.9.2", "instance": instance, "setup": n == 0})
+		json.NewEncoder(w).Encode(object{"product": "openagentinbox", "version": "0.10.0", "instance": instance, "setup": n == 0})
 	})
 	s.live.draining = make(chan struct{})
 	s.routes(mux)
@@ -221,6 +221,9 @@ func Run() error {
 	}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 65 * time.Second, IdleTimeout: 60 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	workerDone := make(chan struct{})
+	go func() { defer close(workerDone); s.deliveryWorker(ctx) }()
+	defer func() { stop(); <-workerDone }()
 	done := make(chan struct{})
 	drained := make(chan struct{})
 	go func() {

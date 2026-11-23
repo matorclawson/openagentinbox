@@ -17,6 +17,12 @@ CREATE TRIGGER IF NOT EXISTS remove_cli_roster AFTER DELETE ON paired_cli
  BEGIN DELETE FROM roster WHERE host=OLD.id; END;`
 
 func (s *server) pairRoutes(add func(string, handler)) {
+	add("GET /api/agent/probe/{op}", s.probe)
+	add("POST /api/agent/probe/confirm", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		r.SetPathValue("op", "confirm")
+		return s.probe(w, r)
+	})
+	add("POST /api/agent/listener", s.listenerCheck)
 	add("POST /api/desk/onboarding", s.authorizeOnboarding)
 	add("POST /api/agent/onboarding/problem", s.onboardingProblem)
 	add("POST /api/agent/onboarding/work", s.onboardingWork)

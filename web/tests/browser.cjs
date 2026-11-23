@@ -132,6 +132,7 @@ const fs = require("fs"),
       throw Error("enrollment not active");
     await page.getByRole("button", { name: "Compose" }).click();
     await page.getByLabel("To", { exact: true }).fill("research");
+    await page.getByLabel("Message intent").selectOption("request");
     await page
       .getByLabel("Subject", { exact: true })
       .fill("Weekly reading list");
@@ -149,13 +150,15 @@ const fs = require("fs"),
       throw Error("agent body");
     await page.getByRole("button", { name: "Inbox", exact: true }).click();
     await call(
-      "send",
+      "reply", mail.rows[0].id,
       "operator",
       "Your reading list",
       "The reading list is ready.",
     );
     await page.locator(".letter").filter({hasText:"Your reading list"}).click();
     await page.getByText("The reading list is ready.").waitFor();
+    const receipt=await call("receipt",mail.rows[0].id);
+    if(receipt.state!=="resolved"||receipt.opened<=0||receipt.replied<=0)throw Error("Incomplete request receipt");
     const permalink = page.url();
     const messageID = new URL(permalink).pathname.split("/")[2];
     if (!messageID) throw Error("Missing message permalink");

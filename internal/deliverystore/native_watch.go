@@ -93,3 +93,6 @@ func (s *Store) signal(seats []string) {
 		s.watch.notifications.Signal(seat)
 	}
 }
+
+// SignalProbe wakes the notification channel reserved for a paired host.
+func (s *Store) SignalProbe(host string) { s.signal([]string{"probe/" + host}) }

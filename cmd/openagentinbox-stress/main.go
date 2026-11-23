@@ -165,7 +165,7 @@ func main() {
 	flag.StringVar(&c.Daemon, "daemon", "", "path to openagentinboxd")
 	flag.StringVar(&c.Backup, "backup", "", "path to openagentinbox-backup (maintenance scenario)")
 	flag.StringVar(&rates, "rates", "100,1000,10000", "comma-separated offered messages per minute")
-	flag.StringVar(&scenarios, "scenarios", "mixed,hot,maintenance", "mixed, hot, maintenance, burst or crash")
+	flag.StringVar(&scenarios, "scenarios", "mixed,hot,maintenance", "mixed, hot, maintenance, burst, requests or crash")
 	flag.DurationVar(&c.Duration, "duration", time.Minute, "per matrix cell")
 	flag.DurationVar(&c.Cooldown, "cooldown", 0, "record idle memory after each load window")
 	flag.DurationVar(&c.MaxSendP95, "max-send-p95", 0, "optional maximum HTTP send p95")
@@ -186,7 +186,7 @@ func main() {
 	}
 	var cases []config
 	for _, s := range strings.Split(scenarios, ",") {
-		if s != "mixed" && s != "hot" && s != "maintenance" && s != "burst" && s != "crash" {
+		if s != "mixed" && s != "hot" && s != "maintenance" && s != "burst" && s != "requests" && s != "crash" {
 			die("unknown scenario " + s)
 		}
 		c.Scenario = s

@@ -5,7 +5,7 @@ set -euo pipefail
 base=/opt/openagentinbox
 service=openagentinbox.service
 root=$(cd "$(dirname "$0")/../.." && pwd)
-version=0.9.2
+version=0.10.0
 health=http://127.0.0.1:4310/api/health
 exec 9>"$base/install.lock"
 flock -n 9 || { echo 'Another installer is running.' >&2; exit 1; }
@@ -14,14 +14,15 @@ previous=$(readlink -e "$base/active")
 systemctl is-active --quiet "$service"
 old=$(curl -fsS --max-time 3 "$health")
 case "$old" in
-  *'"version":"0.9.2"'*) echo '0.9.2 is already serving.'; exit 0;;
+  *'"version":"0.10.0"'*) echo '0.10.0 is already serving.'; exit 0;;
+  *'"version":"0.9.2"'*) before=0.9.2;;
   *'"version":"0.9.1"'*) before=0.9.1;;
   *'"version":"0.9.0"'*) before=0.9.0;;
   *'"version":"0.8.0"'*) before=0.8.0;;
   *'"version":"0.7.0"'*) before=0.7.0;;
   *'"version":"0.6.0"'*) before=0.6.0;;
   *'"version":"0.5.0"'*) before=0.5.0;;
-  *) echo 'This upgrade supports a running 0.5.0, 0.6.0, 0.7.0, 0.8.0, 0.9.0 or 0.9.1 installation.' >&2; exit 1;;
+  *) echo 'This upgrade supports a running 0.5.0, 0.6.0, 0.7.0, 0.8.0, 0.9.0, 0.9.1 or 0.9.2 installation.' >&2; exit 1;;
 esac
 release=$(mktemp -d "$base/releases/build.XXXXXXXX")
 bash "$root/scripts/build-console-release.sh" "$release"
@@ -48,14 +49,14 @@ wait_health(){
   return 1
 }
 wait_health "http://127.0.0.1:$port/api/health" "$instance" &&
-curl -fsS --max-time 3 "http://127.0.0.1:$port/api/health" | grep -Fq '"version":"0.9.2"' &&
+curl -fsS --max-time 3 "http://127.0.0.1:$port/api/health" | grep -Fq '"version":"0.10.0"' &&
 curl -fsS --max-time 3 -o /dev/null "http://127.0.0.1:$port/inboxes/operator" || { echo 'Candidate preflight failed. Current server is still serving.' >&2; exit 1; }
 cleanup
 pid=''
 trap - EXIT
 activate(){ ln -s "$1" "$base/active.next.$$"; mv -Tf "$base/active.next.$$" "$base/active"; }
 activate "$release"
-if systemctl restart "$service" && wait_health "$health" '"version":"0.9.2"'; then
+if systemctl restart "$service" && wait_health "$health" '"version":"0.10.0"'; then
   echo "Serving $version. Previous release retained at $previous."
 else
   activate "$previous"
