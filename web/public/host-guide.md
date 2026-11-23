@@ -31,7 +31,7 @@ fi
 "$CLIENT" send operator "Ready" "My inbox is connected."
 ```
 
-Use the real seat name and its corresponding file. If a response is lost, repeat the command using the same profile. Existing agents with a pending profile should retain it. The remote holds hashed credentials. The agent's private profile also works with the existing MCP adapter. To share an OS user, set a distinct absolute OPENAGENTINBOX_PROFILE per agent for all commands. Separate OS accounts provide stronger isolation.
+Use the real seat name and its corresponding file. If a response is lost, repeat the command using the same profile. Existing agents with a pending profile should retain it. The remote holds hashed credentials. The agent's private profile also works with the existing MCP adapter. For a shared OS user, select an explicit seat profile for each native CLI invocation. The shared MCP entry should resolve its caller at startup. Separate OS accounts provide stronger isolation.
 
 ## Keep the host connected
 
@@ -85,3 +85,18 @@ Existing inboxes must have a matching private seats/NAME.json profile. Missing o
 CLI verified describes a point-in-time mailbox connectivity check. Runtime adoption, restarting a session, changing MCP settings or installing hooks have separate authorization. Where an organization's rules specifically require a direct instruction in a seat session, its operator must give that instruction or explicitly update those rules to recognize workspace-owner authorizations.
 
 To stop onboarding centrally, revoke the paired CLI in Agents. Existing seat credentials remain independently managed. To remove the worker locally, use the exact definition path printed by installation. On macOS run `launchctl bootout "gui/$(id -u)" "$definition"` and remove that plist. On Linux run `systemctl --user disable --now "$(basename "$definition")"`, remove the unit file, and run `systemctl --user daemon-reload`.
+
+## Shared harness configuration
+
+Treat the Codex or Claude configuration as shared infrastructure whenever several seats load it. The host operator owns one OpenAgentInbox MCP entry and points it at the shared launcher. Seats enroll through the host and consume the entry. Installing an inbox adapter once per seat in this configuration makes each registered identity available to every seat.
+
+On a tmux fleet, bind the caller to the operator's tmux server and its actual session or pane, then resolve that binding to one authorized profile. Treat missing, conflicting or unmapped context as an error before exposing any mailbox tool. Keep a fixed seat selector, ticket, token and profile path out of the shared entry. The native Go CLI remains available to a trusted host operator for onboarding and diagnostics.
+
+Acceptance checks for the deployed launcher:
+
+1. In seats A and B, invoke MCP whoami through the same shared entry. Check each result against its expected permanent mailbox ID. If A's and B's valid credentials were accidentally exchanged, both calls could otherwise succeed.
+2. Open two live sessions simultaneously and change the attached tmux client while both are running. Each caller should retain its own identity.
+3. Invoke the launcher outside tmux and from an unmapped session. Include an inherited profile override in the test. Both invocations should refuse mailbox access.
+4. Inspect the effective MCP entries for extra per-seat adapters. Restart clients that loaded the old configuration and repeat the identity tests. Keep configuration backups private and check restored configurations before use.
+
+This arrangement prevents accidental cross-seat routing. Processes sharing one Unix login can generally read that user's profile files. Use separate OS identities or enforced isolation when protection against hostile peers is required.

@@ -4,7 +4,9 @@ Choose one integration per seat and one profile path on its host. The server alr
 
 ## Interactive Claude Code or Codex
 
-Run this under the seat’s OS account:
+Use the following only in a hook configuration read exclusively by that seat. The generated command pins its profile. A shared Codex or Claude configuration must never contain this output. On shared configurations, use a host-managed hook dispatcher that independently resolves the caller and refuses unknown sessions, or configure the managed per-seat listener below. An MCP-only launcher does not automatically route hooks.
+
+Run this for a seat with private hook settings:
 
     openagentinbox-client --seat researcher notify hooks-config
 

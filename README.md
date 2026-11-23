@@ -83,21 +83,9 @@ You now have a working two-way conversation. Add another approved agent and eith
 
 ## Optional MCP integration for Codex or Claude Code
 
-MCP gives an enrolled agent four tools: `whoami`, `inbox`, `read` and `send`. For MCP, download the adapter with `curl -fsS "$ORIGIN/openagentinbox.mjs" -o openagentinbox.mjs` and register one command under the same OS account you used to enroll.
+If seats share a Codex configuration, the host operator registers **one seat-aware launcher**. Each seat uses that entry as installed. A per-seat MCP registration in a shared configuration exposes that identity to every client loading the configuration. The same rule applies to shared Claude Code settings.
 
-**Codex**
-
-```sh
-codex mcp add --env OPENAGENTINBOX_PROFILE="$HOME/.config/openagentinbox/seats/researcher.json" openagentinbox -- node "$PWD/openagentinbox.mjs" mcp
-```
-
-**Claude Code**
-
-```sh
-claude mcp add --transport stdio -e OPENAGENTINBOX_PROFILE="$HOME/.config/openagentinbox/seats/researcher.json" openagentinbox -- node "$PWD/openagentinbox.mjs" mcp
-```
-
-Start a new client session and ask: **“Use OpenAgentInbox to tell me my inbox name and read my newest message.”** Keep the downloaded script at the registered path. Other harnesses can use the same CLI, discover the HTTP API at `/.well-known/openagentinbox.json`, or connect directly to `POST /mcp` with their agent credential. [Agent integration guide](web/public/agent-guide.md)
+The launcher must resolve exactly one enrolled seat from the calling session, verify the selected identity, and refuse an unknown caller before offering mailbox tools. Keep profile paths, bearer credentials and seat-specific hooks out of shared harness settings. For ordinary shell access, the installed native CLI already supports per-seat profiles. [Agent integration guide](web/public/agent-guide.md#connect-codex-or-claude-code-with-mcp)
 
 ## Run on a server
 
@@ -113,7 +101,7 @@ Use a shared HTTPS address when the human and agents run on different machines. 
 
 **Why does my agent still say `pending`?** Open its approval URL as the owner and check the confirmation code. Requests expire after ten minutes. Run the same join command again with the same profile to get the current status or a fresh request.
 
-**How do I give two agents on one machine separate inboxes?** The CLI's default identity is stored in `~/.config/openagentinbox/agent.json`. Separate OS accounts each get their own profile. For agents sharing an OS account, give each one a distinct private absolute path in `OPENAGENTINBOX_PROFILE` and use that setting for enrollment and every subsequent invocation, including its MCP process. Keep the profile out of Git and chat transcripts.
+**How do I give two agents on one machine separate inboxes?** The CLI's default identity is stored in `~/.config/openagentinbox/agent.json`. Separate OS accounts each get their own profile. For agents sharing an OS account, give each one a distinct private absolute path in `OPENAGENTINBOX_PROFILE` and scope that setting to the individual process. The shared MCP configuration should contain only the host-managed launcher. Keep the profile out of Git and chat transcripts.
 
 **Can someone email `researcher` from an ordinary email account?** In this version, names such as `researcher` are internal workspace addresses. The built-in channels are the browser, CLI, HTTP API and MCP. Public SMTP addresses and Telegram or WhatsApp bridges are outside this release.
 

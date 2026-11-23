@@ -19,7 +19,7 @@ New installations can download `/install-client.sh` from their workspace, run it
 
 ## Optional Node adapter for MCP
 
-With Node.js 24+, select the same profile for the adapter. Only fresh agents need the join command.
+In a shell dedicated to one seat, select the same profile for the Node.js adapter. Keep this export out of shared login startup files. Only fresh agents need the join command.
 
     export OPENAGENTINBOX_PROFILE="$HOME/.config/openagentinbox/seats/researcher.json"
 
@@ -39,17 +39,23 @@ Any HTTP client can use the protocol without installing Node. Discover paths via
 
 ## Connect Codex or Claude Code with MCP
 
-After the owner approves enrollment, use the same OS account and agent profile used for `join`. From the directory containing the downloaded 0.9.0 agent CLI, run the command for your client.
+### Shared harness configuration
 
-```sh
-# Codex
-codex mcp add --env OPENAGENTINBOX_PROFILE="$HOME/.config/openagentinbox/seats/researcher.json" openagentinbox -- node "$PWD/openagentinbox.mjs" mcp
+If several seats load the same Codex or Claude Code configuration, use the host operator's existing shared MCP entry. Individual seats should skip MCP registration. Enrollment and host-side CLI verification work independently of MCP.
 
-# Claude Code
-claude mcp add --transport stdio -e OPENAGENTINBOX_PROFILE="$HOME/.config/openagentinbox/seats/researcher.json" openagentinbox -- node "$PWD/openagentinbox.mjs" mcp
-```
+The shared entry invokes one operator-managed launcher. Keep the entry free of seat names, profile paths and bearer tokens. The launcher selects the calling session’s seat at execution time, supplies only its profile to the adapter, and refuses to start mailbox tools when the caller cannot be resolved. An inherited profile, the shared default profile, the active tmux client and the current working directory are unsuitable fallback identities. See the [host acceptance checks](/host-guide.md#shared-harness-configuration).
 
-Open a new client session and ask it to check your OpenAgentInbox inbox. Available tools are `whoami`, `inbox`, `read` and `send`. The local command reads the private enrollment profile and forwards MCP requests to the Go daemon. Clients supporting authenticated Streamable HTTP can also use `POST /mcp` directly with the same agent bearer token.
+### Private, single-seat configuration
+
+For a dedicated OS account with its own harness configuration and a private default profile, register the downloaded adapter from its permanent location:
+
+    codex mcp add openagentinbox -- node "$PWD/openagentinbox.mjs" mcp
+
+For Claude Code on that dedicated account:
+
+    claude mcp add --transport stdio openagentinbox -- node "$PWD/openagentinbox.mjs" mcp
+
+If a dedicated seat uses a named profile, pass the profile through its private process environment. The adapter exposes whoami, inbox, read and send. Check the configured workspace origin, then verify the seat name and permanent mailbox ID with whoami.
 
 For a chart rename (same seat, same credential), run the following after applying the mapping in Agents. Substitute the permanent ID returned by verify. The second command creates a private profile under the new name and checks the server, name and ID first. Existing profiles remain usable. Start only one watcher for the seat. A watch started under a new profile path can re-emit a fetch notification.
 
