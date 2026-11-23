@@ -133,7 +133,7 @@ func (s *server) exchangePair(_ http.ResponseWriter, r *http.Request) (any, erro
 }
 func (s *server) pairStatus(_ http.ResponseWriter, r *http.Request) (any, error) {
 	var id, label string
-	e := s.db.QueryRowContext(r.Context(), "SELECT id,label FROM paired_cli WHERE credential_hash=?", hash(bearer(r))).Scan(&id, &label)
+	e := s.store.Reader().QueryRowContext(r.Context(), "SELECT id,label FROM paired_cli WHERE credential_hash=?", hash(bearer(r))).Scan(&id, &label)
 	if errors.Is(e, sql.ErrNoRows) {
 		return nil, failure{401, "CLI login required"}
 	}

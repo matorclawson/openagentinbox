@@ -188,7 +188,7 @@ func (s *server) workspace(_ http.ResponseWriter, r *http.Request) (any, error) 
 		if key == "pending" || key == "roster" || key == "clients" {
 			args = []any{now()}
 		}
-		rows, e := s.db.QueryContext(r.Context(), query, args...)
+		rows, e := s.store.Reader().QueryContext(r.Context(), query, args...)
 		if e != nil {
 			return nil, e
 		}
@@ -372,7 +372,7 @@ func (s *server) handshake(_ http.ResponseWriter, r *http.Request) (any, error) 
 	if e != nil {
 		return nil, e
 	}
-	rows, e := s.db.QueryContext(r.Context(), "SELECT name FROM roster JOIN roster_binding USING(host) WHERE host=? AND ip=? AND expires>? ORDER BY name", hash(b)+"/"+hostname(q.Host), ip, now())
+	rows, e := s.store.Reader().QueryContext(r.Context(), "SELECT name FROM roster JOIN roster_binding USING(host) WHERE host=? AND ip=? AND expires>? ORDER BY name", hash(b)+"/"+hostname(q.Host), ip, now())
 	if e != nil {
 		return nil, e
 	}
@@ -410,7 +410,7 @@ func (s *server) watch(_ http.ResponseWriter, r *http.Request) (any, error) {
 	defer s.live.subscribe(seat)()
 	var latest int64
 	read := func() error {
-		return s.db.QueryRowContext(r.Context(), "SELECT coalesce(max(seq),0) FROM deliveries WHERE seat=?", seat).Scan(&latest)
+		return s.store.Reader().QueryRowContext(r.Context(), "SELECT coalesce(max(seq),0) FROM deliveries WHERE seat=?", seat).Scan(&latest)
 	}
 	if e = read(); e != nil {
 		return nil, e

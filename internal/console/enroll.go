@@ -21,7 +21,7 @@ func (s *server) enrollRoutes(add func(string, handler)) {
 		var name string
 		var expiry int64
 		c := strings.ToUpper(r.PathValue("code"))
-		e := s.db.QueryRow("SELECT name,expires FROM enrollments WHERE code=? AND expires>?", c, now()).Scan(&name, &expiry)
+		e := s.store.Reader().QueryRow("SELECT name,expires FROM enrollments WHERE code=? AND expires>?", c, now()).Scan(&name, &expiry)
 		return object{"name": name, "code": c, "expires": expiry}, e
 	})
 }

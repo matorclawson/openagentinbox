@@ -156,7 +156,7 @@ func Run() error {
 		return e
 	}
 	var owners int
-	if e = s.db.QueryRow("SELECT count(*) FROM owner").Scan(&owners); e != nil {
+	if e = s.store.Reader().QueryRow("SELECT count(*) FROM owner").Scan(&owners); e != nil {
 		return e
 	}
 	if owners == 0 {
@@ -191,13 +191,13 @@ func Run() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		var n int
-		if err := s.db.QueryRowContext(r.Context(), "SELECT count(*) FROM owner").Scan(&n); err != nil {
+		if err := s.store.Reader().QueryRowContext(r.Context(), "SELECT count(*) FROM owner").Scan(&n); err != nil {
 			http.Error(w, "store unavailable", 503)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		json.NewEncoder(w).Encode(object{"product": "openagentinbox", "version": "0.10.1", "instance": instance, "setup": n == 0})
+		json.NewEncoder(w).Encode(object{"product": "openagentinbox", "version": "0.10.2", "instance": instance, "setup": n == 0})
 	})
 	s.live.draining = make(chan struct{})
 	s.routes(mux)
@@ -304,7 +304,7 @@ func (s *server) issue(w http.ResponseWriter, exp int64, delegation any) error {
 }
 func (s *server) signed(r *http.Request) (bool, error) {
 	var d sql.NullString
-	e := s.db.QueryRowContext(r.Context(), "SELECT delegation FROM sessions WHERE key=? AND expires>?", hash(cookie(r, "oai_session")), now()).Scan(&d)
+	e := s.store.Reader().QueryRowContext(r.Context(), "SELECT delegation FROM sessions WHERE key=? AND expires>?", hash(cookie(r, "oai_session")), now()).Scan(&d)
 	if errors.Is(e, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -319,7 +319,7 @@ func (s *server) signed(r *http.Request) (bool, error) {
 func (s *server) session(_ http.ResponseWriter, r *http.Request) (any, error) {
 	var name string
 	var p sql.NullString
-	e := s.db.QueryRow("SELECT username,principal FROM owner").Scan(&name, &p)
+	e := s.store.Reader().QueryRow("SELECT username,principal FROM owner").Scan(&name, &p)
 	setup := errors.Is(e, sql.ErrNoRows)
 	if e != nil && !setup {
 		return nil, e
@@ -366,7 +366,7 @@ func (s *server) password(w http.ResponseWriter, r *http.Request) (any, error) {
 	}
 	var user string
 	var salt, pass sql.NullString
-	e := s.db.QueryRow("SELECT username,salt,password FROM owner").Scan(&user, &salt, &pass)
+	e := s.store.Reader().QueryRow("SELECT username,salt,password FROM owner").Scan(&user, &salt, &pass)
 	if e != nil && !errors.Is(e, sql.ErrNoRows) {
 		return nil, e
 	}

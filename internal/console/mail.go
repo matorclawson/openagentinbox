@@ -40,7 +40,7 @@ func (s *server) mailRoutes(add func(string, handler)) {
 }
 func (s *server) accounts(_ http.ResponseWriter, r *http.Request) (any, error) {
 	names := []string{}
-	rs, e := s.db.QueryContext(r.Context(), "SELECT address FROM addresses WHERE current=1 ORDER BY address")
+	rs, e := s.store.Reader().QueryContext(r.Context(), "SELECT address FROM addresses WHERE current=1 ORDER BY address")
 	if e != nil {
 		return nil, e
 	}
@@ -107,7 +107,7 @@ func (s *server) actor(r *http.Request) (string, error) {
 	var n string
 	b := bearer(r)
 	if b != "" {
-		e := s.store.Reader().QueryRow("SELECT name FROM agents WHERE key=?", hash(b)).Scan(&n)
+		e := s.store.Reader().QueryRowContext(r.Context(), "SELECT name FROM agents WHERE key=?", hash(b)).Scan(&n)
 		if e == nil {
 			return n, nil
 		}
@@ -134,7 +134,7 @@ func (s *server) send(_ http.ResponseWriter, r *http.Request) (any, error) {
 	}
 
 	if q.To != s.operator {
-		if e = s.store.Reader().QueryRow("SELECT box FROM addresses WHERE address=?", q.To).Scan(&q.To); e != nil {
+		if e = s.store.Reader().QueryRowContext(r.Context(), "SELECT box FROM addresses WHERE address=?", q.To).Scan(&q.To); e != nil {
 			return nil, e
 		}
 	}
@@ -207,7 +207,7 @@ func (s *server) list(_ http.ResponseWriter, r *http.Request) (any, error) {
 	}
 
 	if box != s.operator && strings.HasPrefix(r.URL.Path, "/api/desk/") {
-		if e = s.store.Reader().QueryRow("SELECT box FROM addresses WHERE address=?", box).Scan(&box); e != nil {
+		if e = s.store.Reader().QueryRowContext(r.Context(), "SELECT box FROM addresses WHERE address=?", box).Scan(&box); e != nil {
 			return nil, e
 		}
 	}
@@ -271,7 +271,7 @@ func (s *server) detail(_ http.ResponseWriter, r *http.Request) (any, error) {
 		err := s.db.QueryRowContext(r.Context(), `INSERT INTO mail_receipts(id,seat,opened) VALUES(?,?,?) ON CONFLICT(id,seat) DO UPDATE SET opened=excluded.opened WHERE opened IS NULL RETURNING opened,coalesce(replied,0),state,coalesce(due,0)`, id, dst, now()).Scan(&opened, &replied, &state, &due)
 		if errors.Is(err, sql.ErrNoRows) {
 			// Another recipient fetch won the race to record the first open.
-			err = s.db.QueryRowContext(r.Context(), "SELECT opened,coalesce(replied,0),state,coalesce(due,0) FROM mail_receipts WHERE id=? AND seat=?", id, dst).Scan(&opened, &replied, &state, &due)
+			err = s.store.Reader().QueryRowContext(r.Context(), "SELECT opened,coalesce(replied,0),state,coalesce(due,0) FROM mail_receipts WHERE id=? AND seat=?", id, dst).Scan(&opened, &replied, &state, &due)
 		} else if err == nil {
 			s.live.signal()
 		}
@@ -317,7 +317,7 @@ func (s *server) notice(_ http.ResponseWriter, r *http.Request) (any, error) {
 	}
 	var latest int64
 	var count int
-	err = s.db.QueryRowContext(r.Context(), `SELECT coalesce((SELECT max(seq) FROM deliveries WHERE seat=?1),0),
+	err = s.store.Reader().QueryRowContext(r.Context(), `SELECT coalesce((SELECT max(seq) FROM deliveries WHERE seat=?1),0),
  (SELECT count(*) FROM (SELECT seq FROM deliveries WHERE seat=?1 AND seq>?2 LIMIT 101))`, seat, after).Scan(&latest, &count)
 	return object{"cursor": latest, "count": count}, err
 }

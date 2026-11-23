@@ -44,7 +44,7 @@ func (s *server) advanceProbes(ctx context.Context, at int64) error {
 }
 func (s *server) probe(_ http.ResponseWriter, r *http.Request) (any, error) {
 	var host string
-	if err := s.db.QueryRowContext(r.Context(), "SELECT id FROM paired_cli WHERE credential_hash=?", hash(bearer(r))).Scan(&host); err != nil {
+	if err := s.store.Reader().QueryRowContext(r.Context(), "SELECT id FROM paired_cli WHERE credential_hash=?", hash(bearer(r))).Scan(&host); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, failure{401, "Pair this host first"}
 		}
@@ -52,7 +52,7 @@ func (s *server) probe(_ http.ResponseWriter, r *http.Request) (any, error) {
 	}
 	current := func() (string, error) {
 		var marker string
-		err := s.db.QueryRowContext(r.Context(), "SELECT marker FROM host_probes WHERE host=?", host).Scan(&marker)
+		err := s.store.Reader().QueryRowContext(r.Context(), "SELECT marker FROM host_probes WHERE host=?", host).Scan(&marker)
 		return marker, err
 	}
 	switch r.PathValue("op") {

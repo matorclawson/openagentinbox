@@ -95,7 +95,7 @@ func (s *server) alerts(_ http.ResponseWriter, r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(r.Context(), `SELECT a.id,a.seat,a.due FROM mail_alerts a JOIN mail_receipts r USING(id,seat) WHERE target=? AND r.due=a.due ORDER BY a.due DESC LIMIT 100`, target)
+	rows, err := s.store.Reader().QueryContext(r.Context(), `SELECT a.id,a.seat,a.due FROM mail_alerts a JOIN mail_receipts r USING(id,seat) WHERE target=? AND r.due=a.due ORDER BY a.due DESC LIMIT 100`, target)
 	if err != nil {
 		return nil, err
 	}
@@ -113,6 +113,15 @@ func (s *server) alerts(_ http.ResponseWriter, r *http.Request) (any, error) {
 }
 
 func (s *server) recordOverdue(ctx context.Context, at int64) error {
+	// Most ticks have no deadline close enough to process. Only reserve the
+	// writer when the deadline index contains a candidate. Recheck inside the
+	// transaction because a recipient may have replied since this snapshot.
+	var pending bool
+	err := s.store.Reader().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM mail_receipts
+ WHERE due IS NOT NULL AND escalated IS NOT due AND due<=?)`, at+120000).Scan(&pending)
+	if err != nil || !pending {
+		return err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -173,14 +182,14 @@ func (s *server) recordOverdue(ctx context.Context, at int64) error {
 
 func (s *server) sendAlert(ctx context.Context) (bool, error) {
 	var target, seat string
-	err := s.db.QueryRowContext(ctx, "SELECT target,seat FROM mail_alerts WHERE notice IS NULL LIMIT 1").Scan(&target, &seat)
+	err := s.store.Reader().QueryRowContext(ctx, "SELECT target,seat FROM mail_alerts WHERE notice IS NULL LIMIT 1").Scan(&target, &seat)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT id,due FROM mail_alerts WHERE target=? AND seat=? AND notice IS NULL ORDER BY due,id LIMIT 100", target, seat)
+	rows, err := s.store.Reader().QueryContext(ctx, "SELECT id,due FROM mail_alerts WHERE target=? AND seat=? AND notice IS NULL ORDER BY due,id LIMIT 100", target, seat)
 	if err != nil {
 		return false, err
 	}
@@ -257,6 +266,6 @@ func (s *server) receipt(_ http.ResponseWriter, r *http.Request) (any, error) {
 	}
 	var opened, replied, due int64
 	var state, seat string
-	err = s.db.QueryRowContext(r.Context(), `SELECT d.seat,coalesce(r.opened,0),coalesce(r.replied,0),coalesce(r.state,'fyi'),coalesce(r.due,0) FROM messages m JOIN deliveries d USING(seq) LEFT JOIN mail_receipts r ON r.id=m.id AND r.seat=d.seat WHERE m.id=? AND (m.sender=? OR d.seat=? OR ?)`, r.PathValue("id"), actor, actor, strings.HasPrefix(r.URL.Path, "/api/desk/")).Scan(&seat, &opened, &replied, &state, &due)
+	err = s.store.Reader().QueryRowContext(r.Context(), `SELECT d.seat,coalesce(r.opened,0),coalesce(r.replied,0),coalesce(r.state,'fyi'),coalesce(r.due,0) FROM messages m JOIN deliveries d USING(seq) LEFT JOIN mail_receipts r ON r.id=m.id AND r.seat=d.seat WHERE m.id=? AND (m.sender=? OR d.seat=? OR ?)`, r.PathValue("id"), actor, actor, strings.HasPrefix(r.URL.Path, "/api/desk/")).Scan(&seat, &opened, &replied, &state, &due)
 	return object{"id": r.PathValue("id"), "recipient": seat, "opened": opened, "replied": replied, "due": due, "state": state}, err
 }

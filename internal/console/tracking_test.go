@@ -117,3 +117,35 @@ func TestDeadlineOutageAndRestart(t *testing.T) {
 		t.Fatal("incident still open")
 	}
 }
+
+func TestIdleDeadlineWorkerAndNoticesLeaveWriterFree(t *testing.T) {
+	st, err := deliverystore.Open(filepath.Join(t.TempDir(), "mail.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	s := &server{store: st, db: st.Writer(), operator: "operator"}
+	if _, err := s.db.Exec(schema + liveSchema + pairSchema + addressSchema + onboardingSchema + trackingSchema); err != nil {
+		t.Fatal(err)
+	}
+	for conn, want := range map[*sql.DB]int{st.Writer(): -4096, st.Reader(): -1024} {
+		var size int
+		if err := conn.QueryRow("PRAGMA cache_size").Scan(&size); err != nil || size != want {
+			t.Fatalf("cache_size = %d, want %d, error %v", size, want, err)
+		}
+	}
+	held, err := s.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Rollback()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := s.recordOverdue(ctx, now()); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest("GET", "/api/desk/notice?after=0", nil).WithContext(ctx)
+	if _, err := s.notice(nil, request); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -115,10 +115,11 @@ func openStore(path string, reliable bool) (*Store, error) {
 	// Configure EVERY connection, including replacements after a cancelled query.
 	q := url.Values{}
 	q.Set("_txlock", "immediate")
-	for _, pragma := range []string{"busy_timeout(5000)", "synchronous(FULL)", "foreign_keys(ON)", "fullfsync(ON)", "checkpoint_fullfsync(ON)", "cache_size(-16384)", "mmap_size(0)", "temp_store(FILE)", "wal_autocheckpoint(256)"} {
+	for _, pragma := range []string{"busy_timeout(5000)", "synchronous(FULL)", "foreign_keys(ON)", "fullfsync(ON)", "checkpoint_fullfsync(ON)", "mmap_size(0)", "temp_store(FILE)", "wal_autocheckpoint(256)"} {
 		q.Add("_pragma", pragma)
 	}
-	u := url.URL{Scheme: "file", Opaque: (&url.URL{Path: path}).EscapedPath(), RawQuery: q.Encode()}
+	writerQuery := q.Encode() + "&_pragma=cache_size(-4096)"
+	u := url.URL{Scheme: "file", Opaque: (&url.URL{Path: path}).EscapedPath(), RawQuery: writerQuery}
 	if path == ":memory:" {
 		u.Opaque = ":memory:"
 	}
@@ -126,7 +127,7 @@ func openStore(path string, reliable bool) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1) // ONE writer; reads in this prototype share it
+	db.SetMaxOpenConns(1) // Transactions serialize on this connection.
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, err
@@ -148,6 +149,7 @@ func openStore(path string, reliable bool) (*Store, error) {
 		q.Del("_txlock")
 		q.Add("mode", "ro")
 		q.Add("_pragma", "query_only(ON)")
+		q.Add("_pragma", "cache_size(-1024)")
 		u.RawQuery = q.Encode()
 		rd, err := sql.Open("sqlite", u.String())
 		if err != nil {

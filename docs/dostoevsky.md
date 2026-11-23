@@ -1,4 +1,4 @@
-# Embedded Dostoevsky in OpenAgentInbox 0.10.1
+# Embedded Dostoevsky in OpenAgentInbox 0.10.2
 
 The application uses the canonical github.com/rodriveracom/dostoevsky module with an offline replacement in third_party/dostoevsky. The supplied upstream VERSION is 0.3.0 and its changelog identifies a candidate. The local v0.3.0-rc.0 requirement identifies this snapshot independently of public tags. Source archive SHA-256 is cf0ed72c1fd849b2eabcb9b95177e18a44ebfe1abf414d7060b46d5444755287. Library Go files, sketches, module metadata, tests and license come from that archive.
 
@@ -23,3 +23,7 @@ Dostoevsky's journal PublishBatch can persist a prefix on an unsuccessful batch.
 ## Verify
 
 Run go test ./... and go vet ./... in the project root and in third_party/dostoevsky. Run the web tests with the new daemon and client assets. The release includes comparable JSONL measurements from 76 disposable inboxes with 10,000 historical messages each run. Use the stress driver's requests scenario for deadline workflows and burst for simultaneous arrivals. Production ARM64 disk latency and long-duration memory behavior need measurement on the target VPS.
+
+### SQLite writer and memory changes in 0.10.2
+
+The console uses committed reader snapshots for notification cursors, host probes, workspace activity and other standalone lookups. Mutations and the reads that decide them inside transactions continue to share the writer. The deadline worker checks the deadline index on a reader first and rechecks eligible rows inside its write transaction. SQLite has a suggested page-cache budget of 4 MiB for the writer and 1 MiB per reader. These settings exclude other process memory. Full sync and the existing checkpoint policy still apply. The release diagnostics include a separate opt-in writer attribution build.
