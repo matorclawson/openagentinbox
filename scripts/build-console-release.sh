@@ -18,4 +18,5 @@ else
  (cd "$root"; CGO_ENABLED=0 go build -trimpath -o "$out/openagentinboxd" ./cmd/openagentinboxd)
  (cd "$root/web"; npm ci --no-audit --no-fund; npm run typecheck; NEXT_TELEMETRY_DISABLED=1 npm run build)
  cp -R "$root/web/out" "$out/ui"
+ bash "$root/scripts/build-clients.sh" "$out/ui"
 fi

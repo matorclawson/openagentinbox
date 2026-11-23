@@ -19,6 +19,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -38,6 +39,8 @@ func (f failure) Error() string { return f.msg }
 
 type handler func(http.ResponseWriter, *http.Request) (any, error)
 type server struct {
+	live                                                         changes
+	peerLimit                                                    int
 	db                                                           *sql.DB
 	store                                                        *deliverystore.Store
 	dir, origin, broker, app, audience, delegationType, operator string
@@ -102,6 +105,11 @@ func Run() error {
 	}
 	port := env("INBOX_PORT", "4310")
 	s := &server{dir: env("INBOX_DATA", filepath.Join(home, ".local/share/openagentinbox")), origin: env("INBOX_ORIGIN", "http://127.0.0.1:"+port), passwords: make(chan struct{}, 2), broker: os.Getenv("OPENPASSWORD_ORIGIN"), app: os.Getenv("OPENPASSWORD_APP"), audience: env("OPENPASSWORD_AUDIENCE", "openagentinbox"), delegationType: env("OPENPASSWORD_DELEGATION_TYPE", "openpassword-human-delegation+jwt"), operator: "operator"}
+	limit, err := strconv.Atoi(env("INBOX_PENDING_PER_HOST", "8"))
+	if err != nil || limit < 1 || limit > 512 {
+		return errors.New("INBOX_PENDING_PER_HOST must be between 1 and 512")
+	}
+	s.peerLimit = limit
 	listen := env("INBOX_LISTEN", "127.0.0.1")
 	if !validOrigin(s.origin) || (listen != "127.0.0.1" && !(listen == "0.0.0.0" && strings.HasPrefix(s.origin, "https://"))) {
 		return errors.New("invalid origin or bind address")
@@ -137,7 +145,7 @@ func Run() error {
 	}
 	defer s.db.Close()
 	s.db.SetMaxOpenConns(1)
-	if _, e = s.db.Exec(schema); e != nil {
+	if _, e = s.db.Exec(schema + liveSchema); e != nil {
 		return e
 	}
 	if e = s.store.UpgradeConsole(context.Background()); e != nil {
@@ -185,7 +193,7 @@ func Run() error {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		json.NewEncoder(w).Encode(object{"product": "openagentinbox", "version": "0.3.4", "instance": instance, "setup": n == 0})
+		json.NewEncoder(w).Encode(object{"product": "openagentinbox", "version": "0.4.0", "instance": instance, "setup": n == 0})
 	})
 	s.routes(mux)
 	mux.Handle("/", http.FileServer(http.Dir(ui)))
@@ -262,6 +270,7 @@ func (s *server) routes(m *http.ServeMux) {
 	add("POST /api/connect", s.connect)
 	add("GET /api/callback", s.callback)
 	m.HandleFunc("/mcp", s.mcp)
+	s.liveRoutes(add)
 	s.mailRoutes(add)
 	s.enrollRoutes(add)
 }

@@ -20,7 +20,7 @@ Any HTTP client can use the protocol without installing Node. Discover paths via
 
 ## Connect Codex or Claude Code with MCP
 
-After the owner approves enrollment, use the same OS account and agent profile used for `join`. From the directory containing the downloaded 0.3.4 agent CLI, run the command for your client.
+After the owner approves enrollment, use the same OS account and agent profile used for `join`. From the directory containing the downloaded 0.4.0 agent CLI, run the command for your client.
 
 ```sh
 # Codex

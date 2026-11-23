@@ -13,6 +13,7 @@ import {
   ArrowRight,
   Plus,
 } from "lucide-react";
+import { Workspace, EnrollmentQueue, useWorkspace } from "./live";
 type Session = {
   name: string | null;
   setup: boolean;
@@ -83,6 +84,9 @@ export default function Home() {
   const [pending, setPending] = useState<{ name: string; code: string } | null>(
     null,
   );
+  const {data:live,connection}=useWorkspace(s?.name);
+  const agentNames=live?.agents.map(([name])=>name)??acc?.agents??[];
+  const newest=live?.mail[0]?.[4];
   const generation = useRef(0);
   async function task(fn: () => Promise<void>) {
     work(true);
@@ -143,6 +147,23 @@ export default function Home() {
       generation.current++;
     };
   }, [folder, box, s?.name, acc]);
+  useEffect(()=>{
+    if(!newest||!s?.name||(folder!=="inbox"&&folder!=="sent"))return;
+    const stamp=generation.current;
+    const q=new URLSearchParams({box,folder});
+    let cancelled=false;
+    void api("desk/list?"+q).then(data=>{
+      if(cancelled||stamp!==generation.current)return;
+      list(old=>{
+        const seen=new Set(data.rows.map((r:Row)=>r.id));
+        // Keep older pages only if they overlap the freshly fetched first page.
+        if(old.some(r=>seen.has(r.id)))return [...data.rows,...old.filter(r=>!seen.has(r.id))];
+        return data.rows;
+      });
+      if(!cursor||!rows.some(r=>data.rows.some((v:Row)=>v.id===r.id)))next(data.next);
+    }).catch(()=>{});
+    return ()=>{cancelled=true};
+  },[newest,folder,box,s?.name]);
   function go(v: typeof folder) {
     view(v);
     select(null);
@@ -328,6 +349,7 @@ export default function Home() {
         </header>
         <div className="canvas">
           {feedback}
+          <Workspace data={live} connection={connection} review={()=>go("agents")} openBox={name=>{choose(name);go("inbox")}}/>
           {selected ? (
             <>
               <button onClick={() => select(null)}>
@@ -379,7 +401,7 @@ export default function Home() {
                   />
                 </label>
                 <datalist id="seats">
-                  {[acc.operator, ...acc.agents].map((n) => (
+                  {[acc.operator, ...agentNames].map((n) => (
                     <option key={n}>{n}</option>
                   ))}
                 </datalist>
@@ -413,6 +435,7 @@ export default function Home() {
           ) : folder === "agents" ? (
             <>
               <h1>Agents</h1>
+              {live&&<EnrollmentQueue data={live}/>}
               {pending && (
                 <section className="card detail">
                   <h2>Enroll {pending.name}?</h2>
@@ -498,9 +521,9 @@ export default function Home() {
                   </label>
                 )}
               </form>
-              {acc.agents.map((n) => (
+              {agentNames.map((n) => (
                 <div className="agentrow" key={n}>
-                  <strong>{n}</strong>
+                  <strong>{n}</strong><small>{live?.agents.find(([name])=>name===n)?.[1]===0?"Access revoked":live?.watching[n]?"Listening now":"Enrolled"}</small>
                   <button
                     onClick={() => {
                       choose(n);
@@ -556,7 +579,7 @@ export default function Home() {
                     value={box}
                     onChange={(e) => choose(e.target.value)}
                   >
-                    {[acc.operator, ...acc.agents].map((n) => (
+                    {[acc.operator, ...agentNames].map((n) => (
                       <option key={n}>{n}</option>
                     ))}
                   </select>
@@ -586,7 +609,7 @@ export default function Home() {
                   <div className="empty">
                     <Inbox />
                     <h2>{busy ? "Loading messages…" : "No messages yet"}</h2>
-                    {!busy && !acc.agents.length && (
+                    {!busy && !agentNames.length && (
                       <button onClick={() => go("agents")}>
                         Add your first agent
                       </button>

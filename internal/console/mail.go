@@ -73,6 +73,7 @@ func (s *server) credential(_ http.ResponseWriter, r *http.Request) (any, error)
 	if n == 0 {
 		return nil, failure{409, "Agent missing or already assigned"}
 	}
+	s.live.signal()
 	if r.URL.Path == "/api/desk/revoke" {
 		return object{"ok": true}, nil
 	}
@@ -126,6 +127,9 @@ func (s *server) send(_ http.ResponseWriter, r *http.Request) (any, error) {
 	id, e := s.store.AcceptContext(r.Context(), "console/"+src+"/"+q.Key, deliverystore.Message{ID: uuid.NewString(), Sender: src, Subject: q.Subject, Recipients: []string{q.To}, Priority: 1, Body: []byte(q.Body)}, time.Now())
 	if errors.Is(e, deliverystore.ErrConflict) {
 		return nil, failure{409, "Request key already used for different content"}
+	}
+	if e == nil {
+		s.live.signal()
 	}
 	return object{"id": id}, e
 }

@@ -68,9 +68,10 @@ const fs = require("fs"),
       );
     const req = await call("join", url, "research");
     if (req.status !== "pending") throw Error("missing pending state");
-    await page.goto(req.approval_url);
-    await page.getByRole("button", { name: "Approve enrollment" }).click();
-    await page.getByText("Agent enrolled.", { exact: true }).waitFor();
+    await page.getByRole("button", {name:/Awaiting approval.*1/}).click();
+    await page.getByRole("button", {name:"Review all 1 requests"}).click();
+    await page.getByRole("button", {name:"Approve 1",exact:true}).click();
+    await page.getByText("Access granted.",{exact:true}).waitFor();
     if ((await call("join", url, "research")).status !== "active")
       throw Error("enrollment not active");
     await page.getByRole("button", { name: "Compose" }).click();
@@ -90,14 +91,14 @@ const fs = require("fs"),
       "Send me the three papers you recommend."
     )
       throw Error("agent body");
+    await page.getByRole("button", { name: "Inbox", exact: true }).click();
     await call(
       "send",
       "operator",
       "Your reading list",
       "The reading list is ready.",
     );
-    await page.getByRole("button", { name: "Inbox", exact: true }).click();
-    await page.getByRole("button", { name: /Your reading list/ }).click();
+    await page.locator(".letter").filter({hasText:"Your reading list"}).click();
     await page.getByText("The reading list is ready.").waitFor();
     await page.setViewportSize({ width: 390, height: 844 });
     if (
