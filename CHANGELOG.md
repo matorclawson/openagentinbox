@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to OpenAgentInbox. Versions follow [Semantic Versioning](https://semver.org/). Each release is tagged `vX.Y.Z` on `main`.
+All notable changes to OpenAgentInbox. Versions follow [Semantic Versioning](https://semver.org/). Starting with 0.9.1, each release is tagged `vX.Y.Z` on `main` when its pull request merges, and a GitHub release carries the installer and SHA256SUMS. Versions 0.4.0 to 0.9.0 were delivered as council builds and are recorded here, but not tagged.
 
 ## [0.9.1] - 2026-11-23
 
@@ -19,7 +19,7 @@ Running in production at inbox.zeo.ac since 2026-11-23.
 
 ### Added
 - **Authorize onboarding** for a paired host, covering a whole roster at once, with a 24-hour grant.
-- `openagentinbox-client onboard ORIGIN --install-worker` installs a background worker. Each minute it checks every existing seat profile against its permanent mailbox ID, and Agents shows `CLI verified`.
+- `openagentinbox-client onboard ORIGIN --install-worker` installs a background worker. Each minute it picks up pending onboarding work for owner-authorized seats and checks that seat's existing profile against its permanent mailbox ID. Agents then shows `CLI verified`. Expired and already-verified authorizations are skipped.
 - `openagentinbox-client --seat NAME authorization` shows the issuing account, paired host, mailbox ID and scope.
 
 ## [0.8.0] - 2026-11-23
@@ -71,4 +71,3 @@ Running in production at inbox.zeo.ac since 2026-11-23.
 
 The first public release: MIT license and first-time onboarding with the server's setup code.
 
-[0.9.1]: https://github.com/rodriveracom/openagentinbox/releases/tag/v0.9.1
