@@ -70,11 +70,16 @@ func (s *server) enroll(_ http.ResponseWriter, r *http.Request) (any, error) {
 		if !bearerRE.MatchString(q.Ticket) {
 			return nil, failure{403, "Invalid roster ticket"}
 		}
-		ip, err := s.peerIP(r)
-		if err != nil {
-			return nil, err
+		// Paired clients use single-use roster tickets independent of their network address.
+		e = tx.QueryRow("DELETE FROM roster WHERE name=? AND ticket=? AND expires>? AND host IN (SELECT id FROM paired_cli WHERE paired_at IS NOT NULL) RETURNING name", q.Name, hash(q.Ticket), now()).Scan(&name)
+		if errors.Is(e, sql.ErrNoRows) {
+			ip, err := s.peerIP(r)
+			if err != nil {
+				return nil, err
+			}
+			e = tx.QueryRow("DELETE FROM roster WHERE name=? AND ticket=? AND expires>? AND substr(host,instr(host,'/')+1)=? AND host IN (SELECT host FROM roster_binding WHERE ip=?) RETURNING name", q.Name, hash(q.Ticket), now(), hostname(q.Host), ip).Scan(&name)
 		}
-		if e = tx.QueryRow("DELETE FROM roster WHERE name=? AND ticket=? AND expires>? AND substr(host,instr(host,'/')+1)=? AND host IN (SELECT host FROM roster_binding WHERE ip=?) RETURNING name", q.Name, hash(q.Ticket), now(), hostname(q.Host), ip).Scan(&name); e != nil {
+		if e != nil {
 			if errors.Is(e, sql.ErrNoRows) {
 				return nil, failure{403, "Roster ticket expired or unavailable"}
 			}

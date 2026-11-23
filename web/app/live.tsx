@@ -10,6 +10,7 @@ export type Live = {
   agents: [string,number][];
   activity: [string,string,number][];
   mail: [string,string,string,string,string][];
+  clients: [string,string,number,number,number][];
   roster: [string,number,number,string,string][];
 };
 export function useWorkspace(owner?: string|null) {
@@ -29,7 +30,7 @@ export function useWorkspace(owner?: string|null) {
           if(!r.ok) throw Error("disconnected");
           const snapshot:Live & {unchanged?:boolean}=await r.json();
           if(abort.signal.aborted)return;
-          cursor=snapshot.cursor;if(!snapshot.unchanged){setData(snapshot);expiry=Math.min(Infinity,...snapshot.pending.map(v=>v[2]),...snapshot.roster.map(v=>v[2]))}setConnection("Live");delay=800;
+          cursor=snapshot.cursor;if(!snapshot.unchanged){setData(snapshot);expiry=Math.min(Infinity,...snapshot.pending.map(v=>v[2]),...snapshot.roster.map(v=>v[2]),...snapshot.clients.filter(v=>!v[3]).map(v=>v[2]))}setConnection("Live");delay=800;
         }catch{if(abort.signal.aborted)return;setConnection("Reconnecting");delay=Math.min(15000,delay*2)}
         await new Promise(resolve=>setTimeout(resolve,delay));
       }
@@ -60,7 +61,7 @@ async function post(path:string,body:object){
  const v=await r.json();if(!r.ok)throw Error(v.error||"Request failed");return v;
 }
 export function EnrollmentQueue({data}:{data:Live}){
- const [review,setReview]=useState<Live["pending"]|null>(null),[host,setHost]=useState(""),[ip,setIP]=useState(""),[names,setNames]=useState(""),[secret,setSecret]=useState(""),[msg,setMsg]=useState(""),[busy,setBusy]=useState(false);
+ const [review,setReview]=useState<Live["pending"]|null>(null),[msg,setMsg]=useState(""),[busy,setBusy]=useState(false);
  async function action(fn:()=>Promise<void>){setBusy(true);setMsg("");try{await fn()}catch(e){setMsg((e as Error).message)}finally{setBusy(false)}}
  const queue=review??data.pending;
  return <div className="queue"><section className="card detail">
@@ -69,15 +70,40 @@ export function EnrollmentQueue({data}:{data:Live}){
  {queue.length>0&&<ul className="requests">{queue.map(([n,c,expires,peer])=><li key={c}><strong>{n}</strong><small>{peer}</small><code>{c}</code>{!review&&<button onClick={()=>setReview([[n,c,expires,peer]])}>Review</button>}</li>)}</ul>}
  {!queue.length&&<p>No requests waiting.</p>}
  {review?<div className="actions">{[true,false].map(approve=><button key={String(approve)} disabled={busy} onClick={()=>void action(async()=>{await post("batch",{approve,requests:review.map(([name,code])=>({name,code}))});setReview(null);setMsg(approve?"Access granted.":"Requests dismissed.")})}>{approve?"Approve":"Dismiss"} {review.length}</button>)}<button onClick={()=>setReview(null)}>Cancel</button></div>:queue.length>0&&<button onClick={()=>setReview([...queue])}>Review all {queue.length} requests</button>}
- </section><details className="card detail"><summary>Onboard a host with multiple agents</summary>
- <p>Authorize an exact roster for 24 hours. Each agent receives a single-use ticket for its own name. This works even when the ordinary queue is full.</p>
- <form onSubmit={e=>{e.preventDefault();void action(async()=>{const roster=names.trim().split(/[\s,]+/);const result=await post("roster",{host,ip,names:roster});setSecret(result.secret);setNames("")})}}>
- <label>Host name<input value={host} onChange={e=>setHost(e.target.value)} required placeholder="mac-mini"/></label>
- <label>Source IP address<input value={ip} onChange={e=>setIP(e.target.value.trim())} required placeholder="100.64.0.12"/></label><p>Run <code>openagentinbox-client host-info INBOX_URL</code> on the agent host and enter both values.</p>
- <label>Agent names<textarea value={names} onChange={e=>setNames(e.target.value)} required placeholder="architect, openpassword, openagentinbox"/></label>
- <button disabled={busy}>Authorize roster</button></form>
- {secret&&<label>Host grant · copy once to the trusted host operator<input readOnly value={secret} onFocus={e=>e.target.select()}/><button onClick={()=>setSecret("")}>Hide grant</button></label>}
- <a href="/host-guide.md">Host client setup instructions</a>
- {data.roster.map(([h,count,expires,id,ip])=><p key={id}>{h} · {ip} · {count} remaining · expires {new Date(expires).toLocaleString()} <button disabled={busy} onClick={()=>void action(async()=>{await post("roster/cancel",{id});setSecret("");setMsg("Unclaimed tickets canceled.")})}>Cancel remaining tickets</button></p>)}
- </details>{msg&&<p role="status">{msg}</p>}</div>
+ </section><ClientPairing data={data}/>
+ {data.roster.map(([label,count,expires,id])=><p key={id}>Earlier roster · {label} · {count} remaining · expires {new Date(expires).toLocaleString()} <button disabled={busy} onClick={()=>void action(async()=>{await post("roster/cancel",{id});setMsg("Unclaimed tickets canceled.")})}>Cancel remaining tickets</button></p>)}
+ {msg&&<p role="status">{msg}</p>}</div>
+}
+
+function ClientPairing({data}:{data:Live}){
+ const [pair,setPair]=useState<{id:string;code:string;expires:number}|null>(null);
+ const [names,setNames]=useState(""),[target,setTarget]=useState(""),[message,setMessage]=useState(""),[busy,setBusy]=useState(false);
+ const paired=data.clients.filter(v=>v[3]>0);
+ useEffect(()=>{
+   if(!pair)return;
+   if(data.clients.some(v=>v[0]===pair.id&&v[3])){setPair(null);setMessage("CLI paired.");return}
+   const timer=setTimeout(()=>{setPair(null);setMessage("Pairing token expired.")},Math.max(0,pair.expires-Date.now()));
+   return ()=>clearTimeout(timer);
+ },[pair,data.clients]);
+ async function act(fn:()=>Promise<void>){setBusy(true);setMessage("");try{await fn()}catch(e){setMessage((e as Error).message)}finally{setBusy(false)}}
+ return <section className="card detail">
+ <h2>Pair a CLI</h2><p>Connect a client to this workspace. You choose which agent names it can provision.</p>
+ <form onSubmit={e=>{e.preventDefault();void act(async()=>{
+  const roster=names.trim()?names.trim().split(/[\s,]+/):[];
+  if(target){await post("pair/roster",{id:target,names:roster});setMessage("Agent names authorized. Run tickets on the paired client.")}
+  else{setPair(await post("pair",{names:roster}))}
+  setNames("");
+ })}}>
+ {paired.length>0&&<label>Client<select value={target} onChange={e=>setTarget(e.target.value)}><option value="">Pair a new CLI</option>{paired.map(([id,label])=><option key={id} value={id}>{label} · {id.slice(-6)}</option>)}</select></label>}
+ <label>Agent names {target?"":"(optional)"}<textarea required={Boolean(target)} value={names} onChange={e=>setNames(e.target.value)} placeholder="architect, openpassword, researcher"/></label>
+ <button className="primary" disabled={busy||(!target&&Boolean(pair))}>{target?"Authorize agent names":"Generate pairing token"}</button>
+ </form>
+ {pair&&<div className="pair-code"><strong>Paste this token at the CLI prompt</strong>
+ <code>openagentinbox-client login {window.location.origin}</code>
+ <label>Pairing token<input readOnly value={pair.code} onFocus={e=>e.target.select()}/></label>
+ <button onClick={()=>void act(async()=>{await navigator.clipboard.writeText(pair.code);setMessage("Token copied.")})}>Copy token</button>
+ <small>Single use · expires at {new Date(pair.expires).toLocaleTimeString()}</small></div>}
+ {data.clients.map(([id,label,expires,at,remaining])=><div className="agentrow" key={id}><strong>{at?label:"Awaiting CLI login"}</strong><small>{at?"Paired · "+id.slice(-6)+" · "+remaining+" unclaimed":"Expires "+new Date(expires).toLocaleTimeString()}</small><button disabled={busy} onClick={()=>void act(async()=>{await post("pair/revoke",{id});if(pair?.id===id)setPair(null);if(target===id)setTarget("");setMessage(at?"CLI revoked.":"Pairing canceled.")})}>{at?"Revoke CLI":"Cancel pairing"}</button></div>)}
+ {message&&<p role="status">{message}</p>}<a href="/host-guide.md">Install the CLI and onboard a fleet</a>
+ </section>
 }

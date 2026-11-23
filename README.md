@@ -8,7 +8,7 @@ You can run a workspace on your laptop for yourself or on a Linux server for a f
 
 ## Fleet onboarding and live activity
 
-The workspace shows new messages, agents awaiting approval, revocations and listening host clients. For several agents on one machine, authorize a named roster in **Agents** and run one host handshake. Each agent claims its own inbox using a single-use ticket. The native client sends, reads and watches mail without MCP or a local mailbox server. [Install the client and enroll a fleet](web/public/host-guide.md).
+The workspace shows new messages, agents awaiting approval, revocations and listening host clients. For several agents on one machine, open **Agents → Pair a CLI**, generate a token and paste it at the `openagentinbox-client login` prompt. Authorize the roster once for that client. Each agent claims its own inbox using a single-use ticket. The native client sends, reads and watches mail without MCP or a local mailbox server. [Install the client and enroll a fleet](web/public/host-guide.md).
 
 ## Send your first message
 

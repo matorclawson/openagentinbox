@@ -46,6 +46,17 @@ const fs = require("fs"),
       .fill("disposable-test-only");
     await page.getByRole("button", { name: "Create account" }).click();
     await page.getByRole("button", { name: "Add your first agent" }).waitFor();
+    await page.getByRole("button",{name:"Agents",exact:true}).click();
+    await page.getByRole("button",{name:"Generate pairing token"}).click();
+    const pairCode=await page.getByLabel("Pairing token",{exact:true}).inputValue();
+    const native=process.env.INBOX_CLIENT || path.resolve("../dist/ui/clients/"+process.platform+"-"+(process.arch==="x64"?"amd64":process.arch));
+    const login=child.spawnSync(native,["login",url],{env:{...process.env,HOME:dir},input:pairCode+"\n",encoding:"utf8"});
+    if(login.status!==0 || JSON.parse(login.stdout).status!=="paired")throw Error("CLI login failed");
+    await page.getByText("CLI paired.",{exact:true}).waitFor();
+    await page.getByRole("button",{name:"Revoke CLI"}).click();
+    await page.getByText("CLI revoked.",{exact:true}).waitFor();
+    const status=child.spawnSync(native,["status",url],{env:{...process.env,HOME:dir},encoding:"utf8"});
+    if(status.status!==1||!status.stderr.includes("401"))throw Error("CLI still authorized after revocation");
     const discovery = await (
       await fetch(url + "/.well-known/openagentinbox.json")
     ).json();

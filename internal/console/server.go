@@ -153,7 +153,7 @@ func Run() error {
 	}
 	defer s.db.Close()
 	s.db.SetMaxOpenConns(1)
-	if _, e = s.db.Exec(schema + liveSchema); e != nil {
+	if _, e = s.db.Exec(schema + liveSchema + pairSchema); e != nil {
 		return e
 	}
 	if e = s.store.UpgradeConsole(context.Background()); e != nil {
@@ -201,7 +201,7 @@ func Run() error {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		json.NewEncoder(w).Encode(object{"product": "openagentinbox", "version": "0.4.1", "instance": instance, "setup": n == 0})
+		json.NewEncoder(w).Encode(object{"product": "openagentinbox", "version": "0.5.0", "instance": instance, "setup": n == 0})
 	})
 	s.routes(mux)
 	mux.Handle("/", http.FileServer(http.Dir(ui)))
@@ -279,6 +279,7 @@ func (s *server) routes(m *http.ServeMux) {
 	add("GET /api/callback", s.callback)
 	m.HandleFunc("/mcp", s.mcp)
 	s.liveRoutes(add)
+	s.pairRoutes(add)
 	s.mailRoutes(add)
 	s.enrollRoutes(add)
 }

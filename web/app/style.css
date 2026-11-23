@@ -366,3 +366,5 @@ small {
 .stream small,.stream time{display:block;font-size:12px;color:#646657}.queue{display:grid;gap:12px;margin:14px 0}.queue h2{margin:0}.queue form{display:grid;gap:10px;margin:14px 0}.queue textarea{min-height:75px}
 .requests{max-height:300px;overflow:auto}.requests strong{margin-right:auto}.requests code{font-size:12px}.actions{justify-content:flex-start;margin-top:12px}.stream p,.queue p{font-size:14px}
 @media(max-width:560px){.metrics{gap:4px}.metrics>div,.metrics>button{padding:8px}.metrics span{font-size:11px}.metrics strong{font-size:22px}.overview{padding:12px}.requests li{flex-wrap:wrap}}
+
+.pair-code{display:grid;gap:10px;margin:16px 0;padding:16px;background:#f0efe6;border-radius:12px}.pair-code code{overflow-wrap:anywhere}.pair-code button{justify-self:start}
