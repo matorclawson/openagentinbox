@@ -46,6 +46,24 @@ const fs = require("fs"),
       .fill("disposable-test-only");
     await page.getByRole("button", { name: "Create account" }).click();
     await page.getByRole("button", { name: "Add your first agent" }).waitFor();
+    await page.getByRole("button",{name:"Agents",exact:true}).click();
+    await page.getByRole("button",{name:"Generate pairing token"}).click();
+    const pairCode=await page.getByLabel("Pairing token",{exact:true}).inputValue();
+    const native=process.env.INBOX_CLIENT || path.resolve("../dist/ui/clients/"+process.platform+"-"+(process.arch==="x64"?"amd64":process.arch));
+    const login=child.spawnSync(native,["login",url],{env:{...process.env,HOME:dir},input:pairCode+"\n",encoding:"utf8"});
+    if(login.status!==0 || JSON.parse(login.stdout).status!=="paired")throw Error("CLI login failed");
+    await page.getByText("CLI paired.",{exact:true}).waitFor();
+    await page.getByLabel("Paired client",{exact:true}).selectOption({index:1});
+    await page.getByLabel("Agent names",{exact:true}).fill("onboarding-demo");
+    await page.getByRole("button",{name:"Authorize onboarding"}).click();
+    await page.getByText(/Onboarding authorized/).waitFor();
+    const onboard=child.spawnSync(native,["onboard",url],{env:{...process.env,HOME:dir},encoding:"utf8"});
+    if(onboard.status!==0||JSON.parse(onboard.stdout).status!=="verified")throw Error("Native onboarding failed: "+onboard.stderr);
+    await page.getByText(/CLI verified/).first().waitFor();
+    await page.getByRole("button",{name:"Revoke CLI"}).click();
+    await page.getByText("CLI revoked.",{exact:true}).waitFor();
+    const status=child.spawnSync(native,["status",url],{env:{...process.env,HOME:dir},encoding:"utf8"});
+    if(status.status!==1||!status.stderr.includes("401"))throw Error("CLI still authorized after revocation");
     const discovery = await (
       await fetch(url + "/.well-known/openagentinbox.json")
     ).json();
@@ -68,9 +86,15 @@ const fs = require("fs"),
       );
     const req = await call("join", url, "research");
     if (req.status !== "pending") throw Error("missing pending state");
-    await page.goto(req.approval_url);
-    await page.getByRole("button", { name: "Approve enrollment" }).click();
-    await page.getByText("Agent enrolled.", { exact: true }).waitFor();
+    if(await page.getByRole("heading",{name:"Workspace activity"}).count()) throw Error("Activity leaked onto Agents");
+    await page.getByRole("button",{name:"Activity",exact:true}).click();
+    await page.waitForURL("**/activity");
+    await page.reload();
+    await page.getByRole("heading",{name:"Workspace activity"}).waitFor();
+    await page.getByRole("button", {name:/Awaiting approval.*1/}).click();
+    await page.getByRole("button", {name:"Review all 1 requests"}).click();
+    await page.getByRole("button", {name:"Approve 1",exact:true}).click();
+    await page.getByText("Access granted.",{exact:true}).waitFor();
     if ((await call("join", url, "research")).status !== "active")
       throw Error("enrollment not active");
     await page.getByRole("button", { name: "Compose" }).click();
@@ -90,14 +114,66 @@ const fs = require("fs"),
       "Send me the three papers you recommend."
     )
       throw Error("agent body");
+    await page.getByRole("button", { name: "Inbox", exact: true }).click();
     await call(
       "send",
       "operator",
       "Your reading list",
       "The reading list is ready.",
     );
-    await page.getByRole("button", { name: "Inbox", exact: true }).click();
-    await page.getByRole("button", { name: /Your reading list/ }).click();
+    await page.locator(".letter").filter({hasText:"Your reading list"}).click();
+    await page.getByText("The reading list is ready.").waitFor();
+    const permalink = page.url();
+    const messageID = new URL(permalink).pathname.split("/")[2];
+    if (!messageID) throw Error("Missing message permalink");
+    await page.reload();
+    await page.getByText("The reading list is ready.").waitFor();
+    await page.context().grantPermissions(["clipboard-read","clipboard-write"]);
+    await page.getByRole("button",{name:"Copy message ID"}).click();
+    if (await page.evaluate(()=>navigator.clipboard.readText()) !== messageID) throw Error("Wrong ID copied");
+    const agents = await page.evaluate(async () => {
+      const result=[];
+      for(let i=1;i<=75;i++){
+        const name="seat-"+String(i).padStart(2,"0");
+        const r=await fetch("/api/desk/agents",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name})});
+        if(!r.ok)throw Error("create test seat "+i);
+        if(i===75)result.push(await r.json());
+      }
+      return result;
+    });
+    const seat=agents[0].name;
+    const profiles=path.join(dir,".config/openagentinbox/seats");
+    fs.mkdirSync(profiles,{recursive:true});
+    fs.writeFileSync(path.join(profiles,seat+".json"),JSON.stringify({name:seat,origin:url,token:agents[0].credential}),{mode:0o600});
+    const seatCLI=(...args)=>child.spawnSync(native,["--seat",seat,...args],{env:{...process.env,HOME:dir},encoding:"utf8"});
+    if(JSON.parse(seatCLI("whoami").stdout).name!==seat || !seatCLI("read",messageID).stderr.includes("404"))throw Error("Unexpected initial seat access");
+    await page.getByLabel("Grant read access to an agent").fill(seat);
+    await page.getByRole("button",{name:"Grant access"}).click();
+    await page.getByText(seat+" can now read this message by ID.").waitFor();
+    if(JSON.parse(seatCLI("read",messageID).stdout).id!==messageID || fs.existsSync(path.join(profiles,"../agent.json")))throw Error("Seat profile lookup failed");
+    await page.getByLabel("Find an inbox").fill(seat);
+    await page.getByRole("link",{name:seat,exact:true}).click();
+    if(!page.url().endsWith("/inboxes/"+seat))throw Error("Wrong inbox URL");
+    await page.goBack();
+    await page.getByText("The reading list is ready.").waitFor();
+    await page.goForward();
+    await page.getByRole("heading",{name:"Inbox",exact:true}).waitFor();
+    await page.goto(permalink);
+    await page.getByText("The reading list is ready.").waitFor();
+    await page.getByRole("button",{name:"Agents",exact:true}).click();
+    await page.getByText("Rename inboxes from a roster",{exact:true}).click();
+    await page.getByLabel("Existing address and current seat name").fill("seat-75 customer-support");
+    await page.getByRole("button",{name:"Preview mappings"}).click();
+    await page.getByText("Ready to apply.",{exact:true}).waitFor();
+    await page.getByRole("button",{name:"Apply mappings"}).click();
+    await page.getByText("Mappings applied.",{exact:true}).waitFor();
+    await page.getByText("Revoke inbox access from a list",{exact:true}).click();
+    await page.getByLabel("Current addresses to revoke").fill("seat-71\nseat-72");
+    await page.getByRole("button",{name:"Preview revocation"}).click();
+    await page.getByRole("button",{name:"Revoke 2 credentials"}).click();
+    await page.getByText("2 credentials revoked.",{exact:true}).waitFor();
+    if(JSON.parse(seatCLI("whoami").stdout).name!=="customer-support")throw Error("Rename did not reach native CLI");
+    await page.goto(permalink);
     await page.getByText("The reading list is ready.").waitFor();
     await page.setViewportSize({ width: 390, height: 844 });
     if (

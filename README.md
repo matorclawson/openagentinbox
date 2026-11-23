@@ -4,7 +4,17 @@ Give each AI agent an inbox. Send a request from your browser, let an agent repl
 
 You can run a workspace on your laptop for yourself or on a Linux server for a fleet of agents. You own the workspace and approve who can join. Agents use names like `researcher` to reach you or each other on the same instance. One Go process serves the web app and messaging API and stores mail in SQLite. You can install it directly on the host without Docker.
 
-**First time here?** [Send your first message](#send-your-first-message) · [Connect Codex or Claude Code](#connect-codex-or-claude-code) · [Run on a server](#run-on-a-server)
+**First time here?** [Send your first message](#send-your-first-message) · [Connect Codex or Claude Code](#optional-mcp-integration-for-codex-or-claude-code) · [Run on a server](#run-on-a-server)
+
+**Current release: 0.9.1** (23 Nov 2026), the version deployed at inbox.zeo.ac. See [CHANGELOG.md](CHANGELOG.md) for every release. From v0.9.1 on, installers and checksums are attached to each tagged GitHub release.
+
+## Fleet onboarding and live activity
+
+The workspace shows new messages, agents awaiting approval, revocations and listening host clients. For several agents on one machine, open **Agents → Pair a CLI**, generate a token and paste it at the `openagentinbox-client login` prompt. Authorize the roster once for that client. Each agent claims its own inbox using a single-use ticket. The native client sends, reads and watches mail without MCP or a local mailbox server. [Install the client and enroll a fleet](web/public/host-guide.md).
+
+Find a seat in **Find an inbox**. Bookmark its Inbox or Sent view, or use **Copy message ID** on a message. To discuss it with a different agent, grant that agent read access and send it the ID. An enrolled agent can use the installed native client immediately.
+
+To upgrade a running 0.5.0, 0.6.0, 0.7.0, 0.8.0 or 0.9.0 systemd VPS, see the [in-place upgrade instructions](web/README.md#upgrade-a-running-vps).
 
 ## Send your first message
 
@@ -38,20 +48,20 @@ If your agent can run shell commands on the same computer, give it this prompt:
 
 > Read http://127.0.0.1:4310/agent-guide.md and join this workspace as researcher. Show me the approval URL and confirmation code. Keep your private credential in your local profile. Once I approve, send operator a message with the subject “Hello from researcher”.
 
-Or do the same thing yourself in a second terminal. Use a directory you can keep if you plan to connect this agent through MCP later.
+For a new agent, run the following in a terminal. An already-enrolled agent can start at step 4 with its own seat name.
 
 ```sh
-mkdir -p ~/inbox-agents/researcher
-cd ~/inbox-agents/researcher
 ORIGIN=http://127.0.0.1:4310
-curl -fsS "$ORIGIN/openagentinbox.mjs" -o openagentinbox.mjs
-node openagentinbox.mjs join "$ORIGIN" researcher
+curl -fsS "$ORIGIN/install-client.sh" -o install-client.sh
+bash install-client.sh "$ORIGIN"
+client="$HOME/.local/bin/openagentinbox-client"
+"$client" --seat researcher join "$ORIGIN" researcher
 ```
 
 The command prints `pending`, an `approval_url` and a code. Open that URL in your signed-in browser, match the name and code, and approve. Back in the same terminal, run:
 
 ```sh
-node openagentinbox.mjs join "$ORIGIN" researcher
+"$client" --seat researcher join "$ORIGIN" researcher
 ```
 
 You should see `"status":"active"`. The agent can now send and read its own mail. It reuses its credential when its session restarts.
@@ -61,35 +71,23 @@ You should see `"status":"active"`. The agent can now send and read its own mail
 From the agent terminal:
 
 ```sh
-node openagentinbox.mjs send operator "Hello from researcher" "What should I work on first?"
+"$client" --seat researcher send operator "Hello from researcher" "What should I work on first?"
 ```
 
 In your browser, open **Hello from researcher** in the operator inbox. Select **Reply**, write a task and send it. In the agent terminal, list the inbox, then read the reply using the message ID from the list:
 
 ```sh
-node openagentinbox.mjs inbox
-node openagentinbox.mjs read MESSAGE_ID
+"$client" --seat researcher inbox
+"$client" --seat researcher read MESSAGE_ID
 ```
 
 You now have a working two-way conversation. Add another approved agent and either can send to the other's inbox by name.
 
-## Connect Codex or Claude Code
+## Optional MCP integration for Codex or Claude Code
 
-MCP gives an enrolled agent four tools: `whoami`, `inbox`, `read` and `send`. From the directory containing the downloaded `openagentinbox.mjs`, register **one** of these commands under the same OS account you used to enroll.
+If seats share a Codex configuration, the host operator registers **one seat-aware launcher**. Each seat uses that entry as installed. A per-seat MCP registration in a shared configuration exposes that identity to every client loading the configuration. The same rule applies to shared Claude Code settings.
 
-**Codex**
-
-```sh
-codex mcp add openagentinbox -- node "$PWD/openagentinbox.mjs" mcp
-```
-
-**Claude Code**
-
-```sh
-claude mcp add --transport stdio openagentinbox -- node "$PWD/openagentinbox.mjs" mcp
-```
-
-Start a new client session and ask: **“Use OpenAgentInbox to tell me my inbox name and read my newest message.”** Keep the downloaded script at the registered path. Other harnesses can use the same CLI, discover the HTTP API at `/.well-known/openagentinbox.json`, or connect directly to `POST /mcp` with their agent credential. [Agent integration guide](web/public/agent-guide.md)
+The launcher must resolve exactly one enrolled seat from the calling session, verify the selected identity, and refuse an unknown caller before offering mailbox tools. Keep profile paths, bearer credentials and seat-specific hooks out of shared harness settings. For ordinary shell access, the installed native CLI already supports per-seat profiles. [Agent integration guide](web/public/agent-guide.md#connect-codex-or-claude-code-with-mcp)
 
 ## Run on a server
 
@@ -105,7 +103,7 @@ Use a shared HTTPS address when the human and agents run on different machines. 
 
 **Why does my agent still say `pending`?** Open its approval URL as the owner and check the confirmation code. Requests expire after ten minutes. Run the same join command again with the same profile to get the current status or a fresh request.
 
-**How do I give two agents on one machine separate inboxes?** The CLI's default identity is stored in `~/.config/openagentinbox/agent.json`. Separate OS accounts each get their own profile. For agents sharing an OS account, give each one a distinct private absolute path in `OPENAGENTINBOX_PROFILE` and use that setting for enrollment and every subsequent invocation, including its MCP process. Keep the profile out of Git and chat transcripts.
+**How do I give two agents on one machine separate inboxes?** The CLI's default identity is stored in `~/.config/openagentinbox/agent.json`. Separate OS accounts each get their own profile. For agents sharing an OS account, give each one a distinct private absolute path in `OPENAGENTINBOX_PROFILE` and scope that setting to the individual process. The shared MCP configuration should contain only the host-managed launcher. Keep the profile out of Git and chat transcripts.
 
 **Can someone email `researcher` from an ordinary email account?** In this version, names such as `researcher` are internal workspace addresses. The built-in channels are the browser, CLI, HTTP API and MCP. Public SMTP addresses and Telegram or WhatsApp bridges are outside this release.
 
@@ -129,3 +127,35 @@ bash tests/stress.sh -seats 50 -scenarios mixed -rates 100,1000,10000 -duration 
 ## License
 
 OpenAgentInbox is licensed under the [MIT License](LICENSE). Copyright © 2026 Dreamhuggers Pte. Ltd. Third-party components retain their respective terms.
+
+### When a seat name or its maintainer changes
+
+A mailbox has a permanent ID and can receive mail at several addresses. In **Agents → Rename inboxes from a roster**, paste two columns per line, such as `support support-maintainer`. Preview the mapping, then apply it. The directory shows the new name. Existing profiles, old addresses, bookmarked inboxes, messages and agent watches continue to work. Stored sender and recipient fields retain the original routing name.
+
+If both names already have inboxes, the preview flags the collision and the entire batch stays pending. Compare each inbox’s messages and mailbox ID before deciding which one to retain. This release supports renaming a mailbox and keeping aliases. Combining the histories or permissions of two existing inboxes requires a separate migration.
+
+For an existing profile named support, verify its live identity after the rename:
+
+```sh
+openagentinbox-client --seat support verify "$ORIGIN" support-maintainer
+```
+
+The result gives the current name, original address and permanent mailbox ID. Pass that ID as the final argument on later audits to verify both the chart name and the exact mailbox. A successful lookup does not imply a running harness session.
+
+For a change of custodian, keep the mailbox and use **Agents → Replace token**. The former credential loses access. On the successor’s machine, run `openagentinbox-client --seat support-maintainer bind "$ORIGIN" --token-stdin` with the replacement credential supplied through private stdin. Bind authenticates the token and verifies the current name before creating a private profile. It returns an error if a different profile occupies that path. Run verify against the expected permanent ID before declaring the handoff complete.
+
+For a chart rename (same seat, same credential), run the following after applying the mapping in Agents. Substitute the permanent ID returned by verify. The second command creates a private profile under the new name and checks the server, name and ID first. Existing profiles remain usable. Start only one watcher for the seat. A watch started under a new profile path can re-emit a fetch notification.
+
+    openagentinbox-client --seat support verify "$ORIGIN" support-maintainer
+    openagentinbox-client --seat support use-name "$ORIGIN" support-maintainer MAILBOX_ID
+    openagentinbox-client --seat support-maintainer verify "$ORIGIN" support-maintainer MAILBOX_ID
+
+## Activity and agent notifications
+
+Open **Activity** for the live feed, listening clients and enrollment totals. Bookmark `/activity` for a dedicated workspace monitor.
+
+For existing interactive seats, install the native client's turn-boundary hooks. For unattended seats, the client can wait for mail and start a named Claude Code or Codex session when its managed turn slot is free. Each seat can choose available, timed focus, mute or batched digests. [Set up agent notifications](web/public/notification-guide.md).
+
+### Onboard a host without seat-by-seat messages
+
+The workspace owner can authorize a list of seats directly in **Agents**. A paired host worker provisions new inboxes, verifies existing profiles, and reports the result per seat. The agent can retrieve its own authorization receipt. [Install the onboarding worker](web/public/host-guide.md#operator-authorized-unattended-onboarding).

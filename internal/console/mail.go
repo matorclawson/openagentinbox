@@ -13,6 +13,8 @@ import (
 )
 
 func (s *server) mailRoutes(add func(string, handler)) {
+	add("POST /api/desk/revoke-batch", s.revokeBatch)
+	add("POST /api/desk/addresses", s.reconcile)
 	add("GET /api/desk/accounts", s.accounts)
 	for _, v := range []string{"agents", "rotate", "revoke"} {
 		add("POST /api/desk/"+v, s.credential)
@@ -21,12 +23,21 @@ func (s *server) mailRoutes(add func(string, handler)) {
 		add("POST /api/"+a+"/send", s.send)
 		add("GET /api/"+a+"/message/{id}", s.detail)
 	}
+	add("POST /api/desk/message/{id}/share", s.shareMessage)
+	add("GET /api/agent/whoami", func(_ http.ResponseWriter, r *http.Request) (any, error) {
+		name, err := s.actor(r)
+		if err != nil {
+			return nil, err
+		}
+		return s.mailboxIdentity(name)
+	})
 	add("GET /api/desk/list", s.list)
 	add("GET /api/agent/inbox", s.list)
+	add("GET /api/agent/notice", s.notice)
 }
 func (s *server) accounts(_ http.ResponseWriter, r *http.Request) (any, error) {
 	names := []string{}
-	rs, e := s.db.QueryContext(r.Context(), "SELECT name FROM agents ORDER BY name")
+	rs, e := s.db.QueryContext(r.Context(), "SELECT address FROM addresses WHERE current=1 ORDER BY address")
 	if e != nil {
 		return nil, e
 	}
@@ -57,11 +68,11 @@ func (s *server) credential(_ http.ResponseWriter, r *http.Request) (any, error)
 	var e error
 	switch r.URL.Path {
 	case "/api/desk/agents":
-		res, e = s.db.Exec("INSERT OR IGNORE INTO agents VALUES(?,?)", q.Name, hash(t))
+		res, e = s.db.Exec("INSERT OR IGNORE INTO agents SELECT ?1,?2 WHERE NOT EXISTS(SELECT 1 FROM addresses WHERE address=?1)", q.Name, hash(t))
 	case "/api/desk/revoke":
-		res, e = s.db.Exec("UPDATE agents SET key=NULL WHERE name=?", q.Name)
+		res, e = s.db.Exec("UPDATE agents SET key=NULL WHERE name=(SELECT box FROM addresses WHERE address=?)", q.Name)
 	default:
-		res, e = s.db.Exec("UPDATE agents SET key=? WHERE name=?", hash(t), q.Name)
+		res, e = s.db.Exec("UPDATE agents SET key=? WHERE name=(SELECT box FROM addresses WHERE address=?)", hash(t), q.Name)
 	}
 	if e != nil {
 		return nil, e
@@ -73,6 +84,7 @@ func (s *server) credential(_ http.ResponseWriter, r *http.Request) (any, error)
 	if n == 0 {
 		return nil, failure{409, "Agent missing or already assigned"}
 	}
+	s.live.signal()
 	if r.URL.Path == "/api/desk/revoke" {
 		return object{"ok": true}, nil
 	}
@@ -118,14 +130,16 @@ func (s *server) send(_ http.ResponseWriter, r *http.Request) (any, error) {
 	}
 
 	if q.To != s.operator {
-		var n int
-		if e = s.db.QueryRow("SELECT 1 FROM agents WHERE name=?", q.To).Scan(&n); e != nil {
+		if e = s.db.QueryRow("SELECT box FROM addresses WHERE address=?", q.To).Scan(&q.To); e != nil {
 			return nil, e
 		}
 	}
 	id, e := s.store.AcceptContext(r.Context(), "console/"+src+"/"+q.Key, deliverystore.Message{ID: uuid.NewString(), Sender: src, Subject: q.Subject, Recipients: []string{q.To}, Priority: 1, Body: []byte(q.Body)}, time.Now())
 	if errors.Is(e, deliverystore.ErrConflict) {
 		return nil, failure{409, "Request key already used for different content"}
+	}
+	if e == nil {
+		s.live.signal()
 	}
 	return object{"id": id}, e
 }
@@ -152,6 +166,11 @@ func (s *server) list(_ http.ResponseWriter, r *http.Request) (any, error) {
 		return nil, failure{400, "Invalid mailbox"}
 	}
 
+	if box != s.operator && strings.HasPrefix(r.URL.Path, "/api/desk/") {
+		if e = s.db.QueryRow("SELECT box FROM addresses WHERE address=?", box).Scan(&box); e != nil {
+			return nil, e
+		}
+	}
 	before := int64(1<<63 - 1)
 	if v := q.Get("before"); v != "" {
 		before, e = strconv.ParseInt(v, 10, 64)
@@ -198,9 +217,48 @@ func (s *server) detail(_ http.ResponseWriter, r *http.Request) (any, error) {
 	query := "SELECT m.sender,d.seat,m.subject,m.body,m.created_text FROM messages m JOIN deliveries d USING(seq) WHERE m.id=?"
 	args := []any{id}
 	if strings.HasPrefix(r.URL.Path, "/api/agent/") {
-		query += " AND d.seat=?"
-		args = append(args, actor)
+		query += " AND (d.seat=? OR EXISTS(SELECT 1 FROM message_readers WHERE id=m.id AND seat=?))"
+		args = append(args, actor, actor)
 	}
 	e = s.db.QueryRowContext(r.Context(), query, args...).Scan(&src, &dst, &sub, &body, &at)
 	return object{"id": id, "src": src, "dst": dst, "subject": sub, "body": body, "at": at}, e
+}
+
+func (s *server) shareMessage(_ http.ResponseWriter, r *http.Request) (any, error) {
+	var q struct{ Seat string }
+	if err := input(r, &q); err != nil {
+		return nil, err
+	}
+	if !nameRE.MatchString(q.Seat) {
+		return nil, failure{400, "Invalid inbox name"}
+	}
+	// Selecting both records also makes repeated grants idempotent.
+	result, err := s.db.ExecContext(r.Context(), `INSERT INTO message_readers(id,seat)
+        SELECT m.id,a.name FROM messages m JOIN agents a ON a.name=(SELECT box FROM addresses WHERE address=?) AND a.key IS NOT NULL
+        WHERE m.id=? ON CONFLICT(id,seat) DO UPDATE SET seat=excluded.seat`, q.Seat, r.PathValue("id"))
+	if err != nil {
+		return nil, err
+	}
+	n, err := result.RowsAffected()
+	if err == nil && n == 0 {
+		return nil, failure{404, "Message or active agent not found"}
+	}
+	return object{"seat": q.Seat, "id": r.PathValue("id")}, err
+}
+
+// Notice reads at most 101 index entries plus one index seek, regardless of backlog.
+func (s *server) notice(_ http.ResponseWriter, r *http.Request) (any, error) {
+	seat, err := s.actor(r)
+	if err != nil {
+		return nil, err
+	}
+	after, err := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+	if err != nil || after < 0 {
+		return nil, failure{400, "Invalid cursor"}
+	}
+	var latest int64
+	var count int
+	err = s.db.QueryRowContext(r.Context(), `SELECT coalesce((SELECT max(seq) FROM deliveries WHERE seat=?1),0),
+ (SELECT count(*) FROM (SELECT seq FROM deliveries WHERE seat=?1 AND seq>?2 LIMIT 101))`, seat, after).Scan(&latest, &count)
+	return object{"cursor": latest, "count": count}, err
 }

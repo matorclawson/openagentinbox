@@ -19,6 +19,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -38,6 +39,9 @@ func (f failure) Error() string { return f.msg }
 
 type handler func(http.ResponseWriter, *http.Request) (any, error)
 type server struct {
+	trustedProxy                                                 string
+	live                                                         changes
+	peerLimit                                                    int
 	db                                                           *sql.DB
 	store                                                        *deliverystore.Store
 	dir, origin, broker, app, audience, delegationType, operator string
@@ -93,6 +97,7 @@ CREATE TABLE IF NOT EXISTS attempts(state TEXT PRIMARY KEY,browser TEXT,verifier
 CREATE TABLE IF NOT EXISTS agents(name TEXT PRIMARY KEY,key TEXT UNIQUE);
 CREATE TABLE IF NOT EXISTS enrollments(code TEXT PRIMARY KEY,key TEXT UNIQUE NOT NULL,name TEXT NOT NULL,expires INTEGER NOT NULL,peer TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS enrollment_expiry ON enrollments(expires);
+CREATE TABLE IF NOT EXISTS message_readers(id TEXT NOT NULL,seat TEXT NOT NULL,PRIMARY KEY(id,seat)) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS messages_sender_seq ON messages(sender,seq);`
 
 func Run() error {
@@ -102,6 +107,18 @@ func Run() error {
 	}
 	port := env("INBOX_PORT", "4310")
 	s := &server{dir: env("INBOX_DATA", filepath.Join(home, ".local/share/openagentinbox")), origin: env("INBOX_ORIGIN", "http://127.0.0.1:"+port), passwords: make(chan struct{}, 2), broker: os.Getenv("OPENPASSWORD_ORIGIN"), app: os.Getenv("OPENPASSWORD_APP"), audience: env("OPENPASSWORD_AUDIENCE", "openagentinbox"), delegationType: env("OPENPASSWORD_DELEGATION_TYPE", "openpassword-human-delegation+jwt"), operator: "operator"}
+	limit, err := strconv.Atoi(env("INBOX_PENDING_PER_HOST", "8"))
+	if err != nil || limit < 1 || limit > 512 {
+		return errors.New("INBOX_PENDING_PER_HOST must be between 1 and 512")
+	}
+	s.peerLimit = limit
+	if raw := os.Getenv("INBOX_TRUSTED_PROXY_IP"); raw != "" {
+		ip, ok := literalIP(raw)
+		if !ok {
+			return errors.New("INBOX_TRUSTED_PROXY_IP requires a single proxy IP")
+		}
+		s.trustedProxy = ip.String()
+	}
 	listen := env("INBOX_LISTEN", "127.0.0.1")
 	if !validOrigin(s.origin) || (listen != "127.0.0.1" && !(listen == "0.0.0.0" && strings.HasPrefix(s.origin, "https://"))) {
 		return errors.New("invalid origin or bind address")
@@ -137,7 +154,7 @@ func Run() error {
 	}
 	defer s.db.Close()
 	s.db.SetMaxOpenConns(1)
-	if _, e = s.db.Exec(schema); e != nil {
+	if _, e = s.db.Exec(schema + liveSchema + pairSchema + addressSchema + onboardingSchema); e != nil {
 		return e
 	}
 	if e = s.store.UpgradeConsole(context.Background()); e != nil {
@@ -185,16 +202,23 @@ func Run() error {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		json.NewEncoder(w).Encode(object{"product": "openagentinbox", "version": "0.3.4", "instance": instance, "setup": n == 0})
+		json.NewEncoder(w).Encode(object{"product": "openagentinbox", "version": "0.9.1", "instance": instance, "setup": n == 0})
 	})
+	s.live.draining = make(chan struct{})
 	s.routes(mux)
+	for _, route := range []string{"GET /inboxes/{seat}", "GET /inboxes/{seat}/sent", "GET /messages/{id}", "GET /agents", "GET /activity", "GET /compose"} {
+		mux.HandleFunc(route, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "no-cache")
+			http.ServeFile(w, r, filepath.Join(ui, "index.html"))
+		})
+	}
 	mux.Handle("/", http.FileServer(http.Dir(ui)))
 	srv := http.Server{Addr: listen + ":" + port, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Frame-Options", "DENY")
 		mux.ServeHTTP(w, r)
-	}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 65 * time.Second, IdleTimeout: 60 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	done := make(chan struct{})
@@ -203,6 +227,7 @@ func Run() error {
 		defer close(drained)
 		select {
 		case <-ctx.Done():
+			close(s.live.draining)
 			c, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			srv.Shutdown(c)
@@ -262,6 +287,8 @@ func (s *server) routes(m *http.ServeMux) {
 	add("POST /api/connect", s.connect)
 	add("GET /api/callback", s.callback)
 	m.HandleFunc("/mcp", s.mcp)
+	s.liveRoutes(add)
+	s.pairRoutes(add)
 	s.mailRoutes(add)
 	s.enrollRoutes(add)
 }

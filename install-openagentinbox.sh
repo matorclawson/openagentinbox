@@ -20,6 +20,7 @@ if [[ "${1:-}" == agent ]]; then
   cd "$INBOX_INSTALL_SOURCE"
   exec go run ./cmd/openagentinboxd deploy "$@"
 fi
+if [[ "${1:-}" == "--upgrade" ]]; then shift; exec bash "$src/deploy/upgrade-native.sh" "$@"; fi
 if [[ "${1:-}" == "--vps" ]]; then
   shift
   exec bash "$src/deploy/install-native.sh" "$@"
