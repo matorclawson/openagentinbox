@@ -175,7 +175,7 @@ func (s *server) workspace(_ http.ResponseWriter, r *http.Request) (any, error) 
 	for key, query := range map[string]string{
 		"clients":  "SELECT id,label,deadline,coalesce(paired_at,0),(SELECT count(*) FROM roster WHERE host=paired_cli.id AND expires>?1) FROM paired_cli WHERE paired_at IS NOT NULL OR deadline>?1 ORDER BY rowid DESC",
 		"pending":  "SELECT name,code,expires,peer FROM enrollments WHERE expires>?1 ORDER BY expires,code",
-		"agents":   "SELECT name,key IS NOT NULL FROM agents ORDER BY name",
+		"agents":   "SELECT address,key IS NOT NULL,box FROM agents JOIN addresses ON box=name AND current=1 ORDER BY address",
 		"activity": "SELECT kind,name,at FROM lifecycle ORDER BY id DESC LIMIT 12",
 		"mail":     "SELECT m.subject,m.sender,d.seat,m.created_text,m.id FROM messages m JOIN deliveries d USING(seq) ORDER BY m.seq DESC LIMIT 8",
 		"roster":   "SELECT substr(host,instr(host,'/')+1),count(*),min(expires),host,coalesce((SELECT ip FROM roster_binding b WHERE b.host=roster.host),'Reauthorize roster') FROM roster WHERE host NOT LIKE 'cli:%' AND expires>?1 GROUP BY host ORDER BY host",
@@ -302,7 +302,7 @@ func (s *server) grant(_ http.ResponseWriter, r *http.Request) (any, error) {
 			return nil, failure{400, "Invalid agent name"}
 		}
 		var exists int
-		if e = tx.QueryRow("SELECT EXISTS(SELECT 1 FROM agents WHERE name=?)", n).Scan(&exists); e != nil {
+		if e = tx.QueryRow("SELECT EXISTS(SELECT 1 FROM addresses WHERE address=?)", n).Scan(&exists); e != nil {
 			return nil, e
 		}
 		if exists != 0 {

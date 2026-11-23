@@ -154,7 +154,7 @@ func Run() error {
 	}
 	defer s.db.Close()
 	s.db.SetMaxOpenConns(1)
-	if _, e = s.db.Exec(schema + liveSchema + pairSchema); e != nil {
+	if _, e = s.db.Exec(schema + liveSchema + pairSchema + addressSchema); e != nil {
 		return e
 	}
 	if e = s.store.UpgradeConsole(context.Background()); e != nil {
@@ -202,7 +202,7 @@ func Run() error {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		json.NewEncoder(w).Encode(object{"product": "openagentinbox", "version": "0.6.0", "instance": instance, "setup": n == 0})
+		json.NewEncoder(w).Encode(object{"product": "openagentinbox", "version": "0.7.0", "instance": instance, "setup": n == 0})
 	})
 	s.live.draining = make(chan struct{})
 	s.routes(mux)

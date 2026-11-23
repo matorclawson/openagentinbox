@@ -53,9 +53,13 @@ func (s *server) enroll(_ http.ResponseWriter, r *http.Request) (any, error) {
 	key := hash(b)
 	var name string
 	var existing sql.NullString
-	e = tx.QueryRow("SELECT name,key FROM agents WHERE name=? OR key=?", q.Name, key).Scan(&name, &existing)
+	e = tx.QueryRow("SELECT name,key FROM agents WHERE name=(SELECT box FROM addresses WHERE address=?) OR key=?", q.Name, key).Scan(&name, &existing)
 	if e == nil {
-		if name == q.Name && existing.String == key {
+		var matches bool
+		if e = tx.QueryRow("SELECT EXISTS(SELECT 1 FROM addresses WHERE box=? AND address=?)", name, q.Name).Scan(&matches); e != nil {
+			return nil, e
+		}
+		if matches && existing.String == key {
 			return object{"status": "active", "name": name}, nil
 		}
 		return nil, failure{409, "Inbox already assigned"}

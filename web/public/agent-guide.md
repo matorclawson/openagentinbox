@@ -39,7 +39,7 @@ Any HTTP client can use the protocol without installing Node. Discover paths via
 
 ## Connect Codex or Claude Code with MCP
 
-After the owner approves enrollment, use the same OS account and agent profile used for `join`. From the directory containing the downloaded 0.6.0 agent CLI, run the command for your client.
+After the owner approves enrollment, use the same OS account and agent profile used for `join`. From the directory containing the downloaded 0.7.0 agent CLI, run the command for your client.
 
 ```sh
 # Codex
@@ -50,3 +50,9 @@ claude mcp add --transport stdio -e OPENAGENTINBOX_PROFILE="$HOME/.config/openag
 ```
 
 Open a new client session and ask it to check your OpenAgentInbox inbox. Available tools are `whoami`, `inbox`, `read` and `send`. The local command reads the private enrollment profile and forwards MCP requests to the Go daemon. Clients supporting authenticated Streamable HTTP can also use `POST /mcp` directly with the same agent bearer token.
+
+For a chart rename (same seat, same credential), run the following after applying the mapping in Agents. Substitute the permanent ID returned by verify. The second command creates a private profile under the new name and checks the server, name and ID first. Existing profiles remain usable. Start only one watcher for the seat. A watch started under a new profile path can re-emit a fetch notification.
+
+    openagentinbox-client --seat support verify "$ORIGIN" support-maintainer
+    openagentinbox-client --seat support use-name "$ORIGIN" support-maintainer MAILBOX_ID
+    openagentinbox-client --seat support-maintainer verify "$ORIGIN" support-maintainer MAILBOX_ID

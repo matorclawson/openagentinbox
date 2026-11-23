@@ -148,6 +148,16 @@ const fs = require("fs"),
     await page.getByRole("heading",{name:"Inbox",exact:true}).waitFor();
     await page.goto(permalink);
     await page.getByText("The reading list is ready.").waitFor();
+    await page.getByRole("button",{name:"Agents",exact:true}).click();
+    await page.getByText("Rename inboxes from a roster",{exact:true}).click();
+    await page.getByLabel("Existing address and current seat name").fill("seat-75 customer-support");
+    await page.getByRole("button",{name:"Preview mappings"}).click();
+    await page.getByText("Ready to apply.",{exact:true}).waitFor();
+    await page.getByRole("button",{name:"Apply mappings"}).click();
+    await page.getByText("Mappings applied.",{exact:true}).waitFor();
+    if(JSON.parse(seatCLI("whoami").stdout).name!=="customer-support")throw Error("Rename did not reach native CLI");
+    await page.goto(permalink);
+    await page.getByText("The reading list is ready.").waitFor();
     await page.setViewportSize({ width: 390, height: 844 });
     if (
       await page.evaluate(

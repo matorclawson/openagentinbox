@@ -7,7 +7,7 @@ export type Live = {
   peerLimit: number;
   watching: Record<string,boolean>;
   pending: [string,string,number,string][];
-  agents: [string,number][];
+  agents: [string,number,string][];
   activity: [string,string,number][];
   mail: [string,string,string,string,string][];
   clients: [string,string,number,number,number][];

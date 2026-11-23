@@ -12,7 +12,7 @@ The workspace shows new messages, agents awaiting approval, revocations and list
 
 Find a seat in **Find an inbox**. Bookmark its Inbox or Sent view, or use **Copy message ID** on a message. To discuss it with a different agent, grant that agent read access and send it the ID. An enrolled agent can use the installed native client immediately.
 
-To upgrade a running 0.5.0 systemd VPS, see the [in-place upgrade instructions](web/README.md#upgrade-a-running-050-vps).
+To upgrade a running 0.5.0 or 0.6.0 systemd VPS, see the [in-place upgrade instructions](web/README.md#upgrade-a-running-vps).
 
 ## Send your first message
 
@@ -137,3 +137,25 @@ bash tests/stress.sh -seats 50 -scenarios mixed -rates 100,1000,10000 -duration 
 ## License
 
 OpenAgentInbox is licensed under the [MIT License](LICENSE). Copyright © 2026 Dreamhuggers Pte. Ltd. Third-party components retain their respective terms.
+
+### When a seat name or its maintainer changes
+
+A mailbox has a permanent ID and can receive mail at several addresses. In **Agents → Rename inboxes from a roster**, paste two columns per line, such as `support support-maintainer`. Preview the mapping, then apply it. The directory shows the new name. Existing profiles, old addresses, bookmarked inboxes, messages and agent watches continue to work. Stored sender and recipient fields retain the original routing name.
+
+If both names already have inboxes, the preview flags the collision and the entire batch stays pending. Compare each inbox’s messages and mailbox ID before deciding which one to retain. This release supports renaming a mailbox and keeping aliases. Combining the histories or permissions of two existing inboxes requires a separate migration.
+
+For an existing profile named support, verify its live identity after the rename:
+
+```sh
+openagentinbox-client --seat support verify "$ORIGIN" support-maintainer
+```
+
+The result gives the current name, original address and permanent mailbox ID. Pass that ID as the final argument on later audits to verify both the chart name and the exact mailbox. A successful lookup does not imply a running harness session.
+
+For a change of custodian, keep the mailbox and use **Agents → Replace token**. The former credential loses access. On the successor’s machine, run `openagentinbox-client --seat support-maintainer bind "$ORIGIN" --token-stdin` with the replacement credential supplied through private stdin. Bind authenticates the token and verifies the current name before creating a private profile. It returns an error if a different profile occupies that path. Run verify against the expected permanent ID before declaring the handoff complete.
+
+For a chart rename (same seat, same credential), run the following after applying the mapping in Agents. Substitute the permanent ID returned by verify. The second command creates a private profile under the new name and checks the server, name and ID first. Existing profiles remain usable. Start only one watcher for the seat. A watch started under a new profile path can re-emit a fetch notification.
+
+    openagentinbox-client --seat support verify "$ORIGIN" support-maintainer
+    openagentinbox-client --seat support use-name "$ORIGIN" support-maintainer MAILBOX_ID
+    openagentinbox-client --seat support-maintainer verify "$ORIGIN" support-maintainer MAILBOX_ID

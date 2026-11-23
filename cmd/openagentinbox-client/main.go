@@ -211,11 +211,11 @@ func watch(ctx context.Context, path string, p profile) error {
 	return nil
 }
 
-const usage = "openagentinbox-client [--seat NAME] whoami | login ORIGIN | status ORIGIN | tickets ORIGIN DIRECTORY | join ORIGIN NAME [--ticket-stdin] | host-info ORIGIN | handshake ORIGIN DIRECTORY | inbox [BEFORE] | read ID | send TO SUBJECT BODY [UUID] | watch"
+const usage = "openagentinbox-client [--seat NAME] whoami | verify ORIGIN CURRENT_NAME [MAILBOX_ID] | use-name ORIGIN CURRENT_NAME MAILBOX_ID | bind ORIGIN --token-stdin | login ORIGIN | status ORIGIN | tickets ORIGIN DIRECTORY | join ORIGIN NAME [--ticket-stdin] | host-info ORIGIN | handshake ORIGIN DIRECTORY | inbox [BEFORE] | read ID | send TO SUBJECT BODY [UUID] | watch"
 
 func run(ctx context.Context, args []string) error {
 	if len(args) == 1 && args[0] == "version" {
-		fmt.Println("0.6.0")
+		fmt.Println("0.7.0")
 		return nil
 	}
 	if len(args) == 0 || args[0] == "help" {
@@ -238,7 +238,7 @@ func run(ctx context.Context, args []string) error {
 		seat, args = args[1], args[2:]
 		path = filepath.Join(home, ".config/openagentinbox/seats", seat+".json")
 		switch args[0] {
-		case "whoami", "inbox", "read", "send", "watch", "join":
+		case "whoami", "use-name", "bind", "verify", "inbox", "read", "send", "watch", "join":
 		default:
 			return errors.New("expected a seat command")
 		}
@@ -353,6 +353,23 @@ func run(ctx context.Context, args []string) error {
 		fmt.Printf("Prepared %d per-agent tickets in %s\n", len(grant.Names), a[1])
 		return nil
 	}
+	if cmd == "bind" {
+		if seat == "" || len(a) != 2 || !validOrigin(a[0]) || a[1] != "--token-stdin" {
+			return errors.New("use --seat NAME bind ORIGIN --token-stdin")
+		}
+		raw, err := io.ReadAll(io.LimitReader(os.Stdin, 256))
+		if err != nil {
+			return err
+		}
+		p = profile{Origin: a[0], Name: seat, Token: strings.TrimSpace(string(raw))}
+		if !regexp.MustCompile("^[A-Za-z0-9_-]{43}$").MatchString(p.Token) {
+			return errors.New("invalid credential")
+		}
+		if _, err = verify(ctx, p, seat, ""); err != nil {
+			return err
+		}
+		return installProfile(path, p)
+	}
 	if cmd == "join" && (len(a) == 2 || len(a) == 3 && a[2] == "--ticket-stdin") {
 		if seat != "" && a[1] != seat {
 			return errors.New("join name differs from selected seat")
@@ -388,6 +405,29 @@ func run(ctx context.Context, args []string) error {
 			return errors.New("profile name differs from selected seat")
 		}
 		switch {
+		case cmd == "use-name" && len(a) == 3:
+			if seat == "" || p.Origin != a[0] || !safeName.MatchString(a[1]) || len(a[2]) != 32 {
+				return errors.New("use --seat OLD use-name ORIGIN CURRENT_NAME MAILBOX_ID")
+			}
+			if _, e = verify(ctx, p, a[1], a[2]); e != nil {
+				return e
+			}
+			p.Name = a[1]
+			return installProfile(filepath.Join(filepath.Dir(path), p.Name+".json"), p)
+		case cmd == "verify" && (len(a) == 2 || len(a) == 3):
+			if p.Origin != a[0] {
+				return errors.New("profile belongs to a different workspace")
+			}
+			id := ""
+			if len(a) == 3 {
+				id = a[2]
+			}
+			b, err := verify(ctx, p, a[1], id)
+			if err != nil {
+				return err
+			}
+			_, err = os.Stdout.Write(b)
+			return err
 		case cmd == "whoami" && len(a) == 0:
 			route = "whoami"
 		case cmd == "watch" && len(a) == 0:
@@ -422,6 +462,49 @@ func run(ctx context.Context, args []string) error {
 	}
 	_, e = os.Stdout.Write(b)
 	return e
+}
+func installProfile(path string, p profile) error {
+	if existing, err := readProfile(path); err == nil && existing == p {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(filepath.Dir(path), ".bind-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	err = json.NewEncoder(f).Encode(p)
+	if err == nil {
+		err = f.Sync()
+	}
+	ce := f.Close()
+	if err != nil {
+		return err
+	}
+	if ce != nil {
+		return ce
+	}
+	if err = os.Link(f.Name(), path); err != nil {
+		return fmt.Errorf("cannot install profile at %s: %w", path, err)
+	}
+	return nil
+}
+
+func verify(ctx context.Context, p profile, name, id string) ([]byte, error) {
+	b, err := request(ctx, p, "whoami", nil)
+	if err != nil {
+		return nil, err
+	}
+	var info struct {
+		Name string
+		ID   string `json:"mailbox_id"`
+	}
+	if json.Unmarshal(b, &info) != nil || info.Name != name || len(info.ID) != 32 || id != "" && info.ID != id {
+		return nil, errors.New("authenticated mailbox identity differs from the expected mapping")
+	}
+	return b, nil
 }
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

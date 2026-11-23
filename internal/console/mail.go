@@ -13,6 +13,7 @@ import (
 )
 
 func (s *server) mailRoutes(add func(string, handler)) {
+	add("POST /api/desk/addresses", s.reconcile)
 	add("GET /api/desk/accounts", s.accounts)
 	for _, v := range []string{"agents", "rotate", "revoke"} {
 		add("POST /api/desk/"+v, s.credential)
@@ -24,14 +25,17 @@ func (s *server) mailRoutes(add func(string, handler)) {
 	add("POST /api/desk/message/{id}/share", s.shareMessage)
 	add("GET /api/agent/whoami", func(_ http.ResponseWriter, r *http.Request) (any, error) {
 		name, err := s.actor(r)
-		return object{"name": name}, err
+		if err != nil {
+			return nil, err
+		}
+		return s.mailboxIdentity(name)
 	})
 	add("GET /api/desk/list", s.list)
 	add("GET /api/agent/inbox", s.list)
 }
 func (s *server) accounts(_ http.ResponseWriter, r *http.Request) (any, error) {
 	names := []string{}
-	rs, e := s.db.QueryContext(r.Context(), "SELECT name FROM agents ORDER BY name")
+	rs, e := s.db.QueryContext(r.Context(), "SELECT address FROM addresses WHERE current=1 ORDER BY address")
 	if e != nil {
 		return nil, e
 	}
@@ -62,11 +66,11 @@ func (s *server) credential(_ http.ResponseWriter, r *http.Request) (any, error)
 	var e error
 	switch r.URL.Path {
 	case "/api/desk/agents":
-		res, e = s.db.Exec("INSERT OR IGNORE INTO agents VALUES(?,?)", q.Name, hash(t))
+		res, e = s.db.Exec("INSERT OR IGNORE INTO agents SELECT ?1,?2 WHERE NOT EXISTS(SELECT 1 FROM addresses WHERE address=?1)", q.Name, hash(t))
 	case "/api/desk/revoke":
-		res, e = s.db.Exec("UPDATE agents SET key=NULL WHERE name=?", q.Name)
+		res, e = s.db.Exec("UPDATE agents SET key=NULL WHERE name=(SELECT box FROM addresses WHERE address=?)", q.Name)
 	default:
-		res, e = s.db.Exec("UPDATE agents SET key=? WHERE name=?", hash(t), q.Name)
+		res, e = s.db.Exec("UPDATE agents SET key=? WHERE name=(SELECT box FROM addresses WHERE address=?)", hash(t), q.Name)
 	}
 	if e != nil {
 		return nil, e
@@ -124,8 +128,7 @@ func (s *server) send(_ http.ResponseWriter, r *http.Request) (any, error) {
 	}
 
 	if q.To != s.operator {
-		var n int
-		if e = s.db.QueryRow("SELECT 1 FROM agents WHERE name=?", q.To).Scan(&n); e != nil {
+		if e = s.db.QueryRow("SELECT box FROM addresses WHERE address=?", q.To).Scan(&q.To); e != nil {
 			return nil, e
 		}
 	}
@@ -161,6 +164,11 @@ func (s *server) list(_ http.ResponseWriter, r *http.Request) (any, error) {
 		return nil, failure{400, "Invalid mailbox"}
 	}
 
+	if box != s.operator && strings.HasPrefix(r.URL.Path, "/api/desk/") {
+		if e = s.db.QueryRow("SELECT box FROM addresses WHERE address=?", box).Scan(&box); e != nil {
+			return nil, e
+		}
+	}
 	before := int64(1<<63 - 1)
 	if v := q.Get("before"); v != "" {
 		before, e = strconv.ParseInt(v, 10, 64)
@@ -224,7 +232,7 @@ func (s *server) shareMessage(_ http.ResponseWriter, r *http.Request) (any, erro
 	}
 	// Selecting both records also makes repeated grants idempotent.
 	result, err := s.db.ExecContext(r.Context(), `INSERT INTO message_readers(id,seat)
-        SELECT m.id,a.name FROM messages m JOIN agents a ON a.name=? AND a.key IS NOT NULL
+        SELECT m.id,a.name FROM messages m JOIN agents a ON a.name=(SELECT box FROM addresses WHERE address=?) AND a.key IS NOT NULL
         WHERE m.id=? ON CONFLICT(id,seat) DO UPDATE SET seat=excluded.seat`, q.Seat, r.PathValue("id"))
 	if err != nil {
 		return nil, err

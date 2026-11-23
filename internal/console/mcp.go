@@ -71,7 +71,7 @@ func (s *server) mcp(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(202)
 		return
 	}
-	reply := mcprpc.Dispatch(q, "0.6.0", agentTools, agentToolNames, func(p mcprpc.Call) any {
+	reply := mcprpc.Dispatch(q, "0.7.0", agentTools, agentToolNames, func(p mcprpc.Call) any {
 		result, e := s.agentTool(r, actor, p)
 		var text string
 		if e == nil {
@@ -110,7 +110,7 @@ func (s *server) agentTool(r *http.Request, actor string, p mcprpc.Call) (any, e
 		if mcprpc.Decode(raw, &struct{}{}) != nil {
 			return nil, bad
 		}
-		return object{"name": actor}, nil
+		return s.mailboxIdentity(actor)
 	case "inbox":
 		var args struct{ Before string }
 		if mcprpc.Decode(raw, &args) != nil {

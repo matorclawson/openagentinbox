@@ -66,6 +66,33 @@ function ConnectHelp() {
     </details>
   );
 }
+type MappingResult = {applied:boolean; conflicts:number; rows:{from:string;to:string;status:string;mailbox_id:string}[]};
+function AddressEditor(){
+  const [text,edit]=useState("");
+  const [result,show]=useState<MappingResult|null>(null);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  async function submit(apply:boolean){
+    setBusy(true);setError("");
+    try{
+      const moves=text.trim().split(/\r?\n/).filter(line=>line.trim()).map(line=>{
+        const parts=line.trim().split(/\s+/);
+        if(parts.length!==2)throw Error("Use two names on each line.");
+        return {from:parts[0],to:parts[1]};
+      });
+      show(await api("desk/addresses",{moves,apply}));
+    }catch(e){setError((e as Error).message);show(null)}finally{setBusy(false)}
+  }
+  return <details className="card detail"><summary>Rename inboxes from a roster</summary>
+    <label>Existing address and current seat name<textarea disabled={busy} rows={4} placeholder={"support support-maintainer"} value={text} onChange={e=>{edit(e.target.value);show(null)}}/></label>
+    <p>Paste two columns. Old addresses keep receiving mail. Occupied names require review.</p>
+    <button disabled={!text.trim()||busy} onClick={()=>void submit(false)}>Preview mappings</button>
+    {error&&<p role="alert">{error}</p>}
+    {result&&<><p role="status">{result.applied?"Mappings applied.":result.conflicts?result.conflicts+" conflicts. No changes saved.":"Ready to apply."}</p>
+    <ul>{result.rows.map((r,i)=><li key={i}>{r.from} → {r.to} · {r.status} <code>{r.mailbox_id}</code></li>)}</ul>
+    {!result.applied&&!result.conflicts&&<button disabled={busy} onClick={()=>void submit(true)}>Apply mappings</button>}</>}
+  </details>
+}
 export default function Home() {
   const [s, session] = useState<Session | null>(null),
     [acc, accounts] = useState<Accounts | null>(null);
@@ -482,6 +509,7 @@ export default function Home() {
           ) : folder === "agents" ? (
             <>
               <h1>Agents</h1>
+              <AddressEditor/>
               {live&&<EnrollmentQueue data={live}/>}
               {pending && (
                 <section className="card detail">
@@ -570,7 +598,7 @@ export default function Home() {
               </form>
               {agentNames.map((n) => (
                 <div className="agentrow" key={n}>
-                  <strong>{n}</strong><small>{live?.agents.find(([name])=>name===n)?.[1]===0?"Access revoked":live?.watching[n]?"Listening now":"Enrolled"}</small>
+                  <strong>{n}</strong><small>{live?.agents.find(([name])=>name===n)?.[1]===0?"Access revoked":live?.watching[live?.agents.find(([name])=>name===n)?.[2]??n]?"Listening now":"Enrolled"}</small>
                   <button
                     onClick={() => {
                       go("inbox",n);

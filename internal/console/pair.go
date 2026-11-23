@@ -37,7 +37,7 @@ func reserveNames(tx *sql.Tx, id, operator string, names []string, deadline int6
 		if !nameRE.MatchString(n) || n == operator {
 			return failure{400, "Invalid agent name"}
 		}
-		result, e := tx.Exec("INSERT OR IGNORE INTO roster(name,ticket,host,expires) SELECT ?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM agents WHERE name=?)", n, hash(token()), id, deadline, n)
+		result, e := tx.Exec("INSERT OR IGNORE INTO roster(name,ticket,host,expires) SELECT ?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM addresses WHERE address=?)", n, hash(token()), id, deadline, n)
 		if e != nil {
 			return e
 		}
