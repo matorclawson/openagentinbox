@@ -21,13 +21,13 @@ type Session = {
   openpassword: boolean;
   linked: boolean;
 };
-type Accounts = { operator: string; agents: string[] };
+type Accounts = { operator: string; agents: string[]; email_domain?: string;operator_email_send?: boolean };
 type Row = {
   id: string;
   src: string;
   dst: string;
   subject: string;
-  at: string; opened?: number; replied?: number; state?: string; due?: number;
+  at: string; trust?: string; email?: {remote_action?:string;remote_status?:string}; original_available?: boolean; email_status?: string; opened?: number; replied?: number; state?: string; due?: number;
 };
 async function api(path: string, body?: object) {
   const r = await fetch("/api/" + path, {
@@ -130,6 +130,7 @@ export default function Home() {
     [error, warn] = useState(""),
     [notice, say] = useState(""),
     [credential, key] = useState("");
+  const [attachment,setAttachment]=useState<File|null>(null);
   const [draft, write] = useState({ to: "", subject: "", body: "", key: "",intent:"fyi",replyTo:"" });
   const [pending, setPending] = useState<{ name: string; code: string } | null>(
     null,
@@ -231,7 +232,7 @@ export default function Home() {
     if (!messageId || !live?.cursor || !s?.name) return;
     let active=true;
     void api("desk/receipt/"+messageId).then(receipt=>{
-      if(active)select(old=>old && encodeURIComponent(old.row.id)===messageId?{...old,row:{...old.row,...receipt}}:old);
+      if(active)select(old=>old && encodeURIComponent(old.row.id)===messageId?{...old,row:{...old.row,...receipt,email_status:receipt.email?.state??old.row.email_status}}:old);
     }).catch(()=>{});
     return ()=>{active=false};
   },[live?.cursor,messageId,s?.name]);
@@ -254,6 +255,7 @@ export default function Home() {
     say(success);
   }
   function compose(to = "", subject = "", replyTo="") {
+    setAttachment(null);
     go("compose");
     write({ to, subject, body: "", key: crypto.randomUUID(),intent:"fyi",replyTo });
   }
@@ -452,7 +454,15 @@ export default function Home() {
                   {selected.row.src} → {selected.row.dst} ·{" "}
                   {new Date(selected.row.at).toLocaleString()}
                 </p>
+                {selected.row.trust==="external" && <p>Internet email · Sender supplied by the email header.</p>}
                 <pre>{selected.body}</pre>
+                {selected.row.original_available && <button onClick={()=>void task(async()=>{
+                  const data=await api("desk/email-original/"+selected.row.id);
+                  const blob=new Blob([Uint8Array.from(atob(data.base64),c=>c.charCodeAt(0))],{type:"application/octet-stream"});
+                  const url=URL.createObjectURL(blob);const link=document.createElement("a");
+                  link.href=url;link.download=selected.row.id+".eml";link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+                })}>Download original email (.eml)</button>}
+                {selected.row.email_status && <p>Email transport · {selected.row.email_status}{selected.row.email?.remote_action && <> · Destination reported {selected.row.email.remote_action} ({selected.row.email.remote_status})</>}</p>}
                 <p>Opened by recipient · {selected.row.opened?new Date(selected.row.opened).toLocaleString():"No recorded open"}<br/>First linked reply · {selected.row.replied?new Date(selected.row.replied).toLocaleString():"No recorded reply"}</p>
                 {selected.row.state&&selected.row.state!=="fyi"&&<p>Request · {selected.row.state}{selected.row.due?" · Due "+new Date(selected.row.due).toLocaleString():""}</p>}
                 {selected.row.dst===acc.operator && ["pending","accepted","deferred"].includes(selected.row.state??"")&&<form onSubmit={e=>{e.preventDefault();const fields=new FormData(e.currentTarget);void task(async()=>{const until=String(fields.get("until")||"");await api("desk/request",{id:selected.row.id,action:fields.get("action"),until:until?new Date(until).getTime():0});const row=await api("desk/message/"+messageId);select({row,body:row.body})})}}>
@@ -472,7 +482,7 @@ export default function Home() {
                 {selected.row.src !== acc.operator && (
                   <button
                     onClick={() =>
-                      compose(selected.row.src, "Re: " + selected.row.subject, selected.row.dst===acc.operator?selected.row.id:"")
+                      compose(selected.row.src.replace(/^external:/,""), "Re: " + selected.row.subject, selected.row.dst===acc.operator?selected.row.id:"")
                     }
                   >
                     <PenLine size={16} />
@@ -491,9 +501,16 @@ export default function Home() {
                 onSubmit={(e) => {
                   e.preventDefault();
                   void task(async () => {
-                    await api("desk/send", {...draft,key:draft.key || crypto.randomUUID()});
+                    let file: {fileName?:string,fileData?:string}={};
+                    if(attachment){
+                      if(attachment.size>98304 || !attachment.size)throw Error("Choose a file between 1 byte and 96 KiB.");
+                      const bytes=new Uint8Array(await attachment.arrayBuffer());
+                      let binary="";for(const b of bytes)binary+=String.fromCharCode(b);
+                      file={fileName:attachment.name,fileData:btoa(binary)};
+                    }
+                    await api("desk/send", {...draft,...file,key:draft.key || crypto.randomUUID()});setAttachment(null);
                     go("sent",acc.operator);
-                    say("Message sent.");
+                    say(draft.to.includes("@")?"Email queued for delivery.":"Message sent.");
                   });
                 }}
               >
@@ -503,10 +520,11 @@ export default function Home() {
                     required
                     list="seats"
                     value={draft.to}
-                    onChange={(e) => write({ ...draft, to: e.target.value })}
-                    placeholder="Agent or operator name"
+                    onChange={(e) => {setAttachment(null);write({ ...draft, to: e.target.value })}}
+                    placeholder={acc.operator_email_send?"Inbox name or external email address":"Inbox name"}
                   />
                 </label>
+                {acc.operator_email_send && draft.to.includes("@") && !draft.to.toLowerCase().endsWith("@"+acc.email_domain) && <label>Attachment (optional, up to 96 KiB)<input type="file" onChange={e=>setAttachment(e.target.files?.[0]??null)}/></label>}
                 <label>Message intent<select value={draft.intent} onChange={e=>write({...draft,intent:e.target.value})}><option value="fyi">FYI</option><option value="request">Request · pickup in 15 minutes</option><option value="urgent">Urgent request · pickup in 2 minutes</option></select></label>
                 <datalist id="seats">
                   {[acc.operator, ...agentNames].map((n) => (
@@ -543,6 +561,7 @@ export default function Home() {
           ) : folder === "agents" ? (
             <>
               <h1>Agents</h1>
+              {acc.email_domain&&<p>Internet email addresses use <code>inbox-name@{acc.email_domain}</code>.</p>}
               <AddressEditor/>
               <RevokeList/>
               {live&&<EnrollmentQueue data={live}/>}

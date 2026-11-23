@@ -267,5 +267,14 @@ func (s *server) receipt(_ http.ResponseWriter, r *http.Request) (any, error) {
 	var opened, replied, due int64
 	var state, seat string
 	err = s.store.Reader().QueryRowContext(r.Context(), `SELECT d.seat,coalesce(r.opened,0),coalesce(r.replied,0),coalesce(r.state,'fyi'),coalesce(r.due,0) FROM messages m JOIN deliveries d USING(seq) LEFT JOIN mail_receipts r ON r.id=m.id AND r.seat=d.seat WHERE m.id=? AND (m.sender=? OR d.seat=? OR ?)`, r.PathValue("id"), actor, actor, strings.HasPrefix(r.URL.Path, "/api/desk/")).Scan(&seat, &opened, &replied, &state, &due)
-	return object{"id": r.PathValue("id"), "recipient": seat, "opened": opened, "replied": replied, "due": due, "state": state}, err
+	result := object{"id": r.PathValue("id"), "recipient": seat, "opened": opened, "replied": replied, "due": due, "state": state}
+	if err == nil && strings.Contains(seat, "@") {
+		var transport, remoteAction, remoteStatus string
+		var attempts, code int
+		err = s.store.Reader().QueryRowContext(r.Context(), "SELECT state,attempts,code,remote_action,remote_status FROM email_outbox WHERE id=?", r.PathValue("id")).Scan(&transport, &attempts, &code, &remoteAction, &remoteStatus)
+		if err == nil {
+			result["email"] = object{"state": transport, "attempts": attempts, "smtp_code": code, "remote_action": remoteAction, "remote_status": remoteStatus}
+		}
+	}
+	return result, err
 }

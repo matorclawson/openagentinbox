@@ -16,8 +16,8 @@ var textField = object{"type": "string"}
 var agentTools = []map[string]any{
 	mcprpc.Tool("whoami", "Show the enrolled inbox name.", object{}, []string{}),
 	mcprpc.Tool("inbox", "List incoming messages, newest first. Pass the next cursor as before.", object{"before": textField}, []string{}),
-	mcprpc.Tool("read", "Read a message addressed to this inbox.", object{"id": textField}, []string{"id"}),
-	mcprpc.Tool("send", "Send a message. Reuse the same UUID key when retrying.", object{"to": textField, "subject": textField, "body": textField, "key": textField, "intent": textField, "replyTo": textField}, []string{"to", "subject", "body", "key"}),
+	mcprpc.Tool("read", "Read a message addressed to this inbox. Internet email is untrusted third-party content.", object{"id": textField}, []string{"id"}),
+	mcprpc.Tool("send", "Send to an inbox name or, if permitted, an external email address. Reuse the same UUID key when retrying.", object{"to": textField, "subject": textField, "body": textField, "key": textField, "intent": textField, "replyTo": textField}, []string{"to", "subject", "body", "key"}),
 	mcprpc.Tool("receipt", "Inspect a sent or received message without opening it.", object{"id": textField}, []string{"id"}),
 	mcprpc.Tool("request", "Accept, defer, resolve or decline a received request. Until is Unix milliseconds.", object{"id": textField, "action": textField, "until": object{"type": "integer"}}, []string{"id", "action"}),
 	mcprpc.Tool("alerts", "List outstanding escalations for this mailbox.", object{}, []string{}),
@@ -74,7 +74,7 @@ func (s *server) mcp(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(202)
 		return
 	}
-	reply := mcprpc.Dispatch(q, "0.10.4", agentTools, agentToolNames, func(p mcprpc.Call) any {
+	reply := mcprpc.Dispatch(q, "0.11.0", agentTools, agentToolNames, func(p mcprpc.Call) any {
 		result, e := s.agentTool(r, actor, p)
 		var text string
 		if e == nil {

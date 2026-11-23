@@ -321,6 +321,7 @@ type Message struct {
 	Final                                         bool // the sender expects no answer: never owed
 	Recipients                                    []string
 	Body                                          []byte
+	ExternalPayloadDigest                         []byte // Optional digest of transport-specific content committed by the acceptance callback.
 }
 
 // digest frames every field with its length, so no two different messages share a digest (("a\0b","c") and ("a","b\0c")
@@ -341,6 +342,10 @@ func digest(m Message) []byte {
 	}
 	if m.Intent != "" {
 		field([]byte("intent/" + m.Intent))
+	}
+	if len(m.ExternalPayloadDigest) > 0 {
+		field([]byte("transport"))
+		field(m.ExternalPayloadDigest)
 	}
 	return h.Sum(nil)
 }

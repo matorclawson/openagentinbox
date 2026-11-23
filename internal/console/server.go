@@ -39,6 +39,7 @@ func (f failure) Error() string { return f.msg }
 
 type handler func(http.ResponseWriter, *http.Request) (any, error)
 type server struct {
+	email                                                        *emailConfig
 	performance                                                  mailPerformance
 	trustedProxy                                                 string
 	live                                                         changes
@@ -149,7 +150,7 @@ func Run() error {
 	}
 	defer s.store.Close()
 	s.db = s.store.Writer()
-	if _, e = s.db.Exec(schema + liveSchema + pairSchema + addressSchema + onboardingSchema + trackingSchema); e != nil {
+	if _, e = s.db.Exec(schema + liveSchema + pairSchema + addressSchema + onboardingSchema + trackingSchema + emailSchema); e != nil {
 		return e
 	}
 	if e = s.store.UpgradeConsole(context.Background()); e != nil {
@@ -197,7 +198,7 @@ func Run() error {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		json.NewEncoder(w).Encode(object{"product": "openagentinbox", "version": "0.10.4", "instance": instance, "setup": n == 0})
+		json.NewEncoder(w).Encode(object{"product": "openagentinbox", "version": "0.11.0", "instance": instance, "setup": n == 0})
 	})
 	s.live.draining = make(chan struct{})
 	s.routes(mux)
@@ -216,6 +217,11 @@ func Run() error {
 	}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 65 * time.Second, IdleTimeout: 60 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	closeEmail, err := s.startEmail(ctx)
+	if err != nil {
+		return err
+	}
+	defer closeEmail()
 	workerDone := make(chan struct{})
 	go func() { defer close(workerDone); s.deliveryWorker(ctx) }()
 	defer func() { stop(); <-workerDone }()

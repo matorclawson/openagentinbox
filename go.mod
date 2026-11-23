@@ -3,7 +3,7 @@ module github.com/rodriveracom/openagentinbox
 go 1.27.0
 
 require (
-	ephemeral v0.2.1
+	ephemeral v0.3.0
 	github.com/google/uuid v1.6.0
 	github.com/rodriveracom/dostoevsky v0.3.0-rc.3
 	golang.org/x/crypto v0.50.0
@@ -23,4 +23,4 @@ require (
 
 replace github.com/rodriveracom/dostoevsky v0.3.0-rc.3 => ./third_party/dostoevsky
 
-replace ephemeral v0.2.1 => ./third_party/ephemeral
+replace ephemeral v0.3.0 => ./third_party/ephemeral

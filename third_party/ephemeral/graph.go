@@ -149,7 +149,7 @@ func (s *Store) join(id string, a run) error {
 	if e = s.event(id, "ChildrenJoined", a.step, string(value)); e != nil {
 		return e
 	}
-	return s.advance(id, destination(a.steps, a.step, x.Next), string(value))
+	return s.advanceRun(id, a, destination(a.steps, a.step, x.Next), string(value))
 }
 func (s *Store) cancelTree(id string) error {
 	a, e := s.run(id)

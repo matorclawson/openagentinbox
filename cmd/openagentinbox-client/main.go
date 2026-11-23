@@ -211,11 +211,11 @@ func watch(ctx context.Context, path string, p profile) error {
 	return nil
 }
 
-const usage = "openagentinbox-client [--seat NAME] whoami | authorization | onboard ORIGIN [--watch|--install-worker] | verify ORIGIN CURRENT_NAME [MAILBOX_ID] | use-name ORIGIN CURRENT_NAME MAILBOX_ID | bind ORIGIN --token-stdin | login ORIGIN | status ORIGIN | tickets ORIGIN DIRECTORY | join ORIGIN NAME [--ticket-stdin] | host-info ORIGIN | handshake ORIGIN DIRECTORY | inbox [BEFORE] | read ID | send TO SUBJECT BODY [UUID] | request|urgent TO SUBJECT BODY [UUID] | reply ID TO SUBJECT BODY [UUID] | receipt ID | alerts | request-action accept|defer|resolve|decline ID [RFC3339] | watch | notify help"
+const usage = "openagentinbox-client [--seat NAME] whoami | authorization | onboard ORIGIN [--watch|--install-worker] | verify ORIGIN CURRENT_NAME [MAILBOX_ID] | use-name ORIGIN CURRENT_NAME MAILBOX_ID | bind ORIGIN --token-stdin | login ORIGIN | status ORIGIN | tickets ORIGIN DIRECTORY | join ORIGIN NAME [--ticket-stdin] | host-info ORIGIN | handshake ORIGIN DIRECTORY | inbox [BEFORE] | read ID | email-original ID | email-file TO SUBJECT BODY FILE [UUID] | send TO SUBJECT BODY [UUID] | request|urgent TO SUBJECT BODY [UUID] | reply ID TO SUBJECT BODY [UUID] | receipt ID | alerts | request-action accept|defer|resolve|decline ID [RFC3339] | watch | notify help"
 
 func run(ctx context.Context, args []string) error {
 	if len(args) == 1 && args[0] == "version" {
-		fmt.Println("0.10.4")
+		fmt.Println("0.11.0")
 		return nil
 	}
 	if len(args) == 0 || args[0] == "help" {
@@ -449,6 +449,8 @@ func run(ctx context.Context, args []string) error {
 			}
 		case cmd == "read" && len(a) == 1:
 			route = "message/" + url.PathEscape(a[0])
+		case cmd == "email-original" && len(a) == 1:
+			route = "email-original/" + url.PathEscape(a[0])
 		case cmd == "receipt" && len(a) == 1:
 			route = "receipt/" + url.PathEscape(a[0])
 		case cmd == "alerts" && len(a) == 0:
@@ -464,7 +466,25 @@ func run(ctx context.Context, args []string) error {
 			}
 			body = map[string]any{"action": a[0], "id": a[1], "until": until}
 			route = "request"
-		case (cmd == "send" || cmd == "request" || cmd == "urgent" || cmd == "reply") && (len(a) == 3 || len(a) == 4 || cmd == "reply" && len(a) == 5):
+		case (cmd == "email-file" && (len(a) == 4 || len(a) == 5)) || (cmd == "send" || cmd == "request" || cmd == "urgent" || cmd == "reply") && (len(a) == 3 || len(a) == 4 || cmd == "reply" && len(a) == 5):
+			var fileName string
+			var fileData []byte
+			if cmd == "email-file" {
+				f, err := os.Open(a[3])
+				if err != nil {
+					return err
+				}
+				defer f.Close()
+				fileName = filepath.Base(a[3])
+				fileData, err = io.ReadAll(io.LimitReader(f, (96<<10)+1))
+				if err != nil {
+					return err
+				}
+				if len(fileData) > 96<<10 {
+					return errors.New("attachment exceeds 96 KiB")
+				}
+				a = append(a[:3], a[4:]...)
+			}
 			parent := ""
 			if cmd == "reply" {
 				if len(a) < 4 {
@@ -490,7 +510,12 @@ func run(ctx context.Context, args []string) error {
 			if cmd == "request" || cmd == "urgent" {
 				intent = cmd
 			}
-			body = map[string]string{"to": a[0], "subject": a[1], "body": a[2], "key": k, "intent": intent, "replyTo": parent}
+			message := map[string]any{"to": a[0], "subject": a[1], "body": a[2], "key": k, "intent": intent, "replyTo": parent}
+			if fileName != "" {
+				message["fileName"] = fileName
+				message["fileData"] = fileData
+			}
+			body = message
 			route = "send"
 		default:
 			return errors.New(usage)

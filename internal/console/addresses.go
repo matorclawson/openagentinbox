@@ -22,7 +22,12 @@ INSERT OR IGNORE INTO addresses SELECT name,name,1 FROM agents WHERE name NOT IN
 func (s *server) mailboxIdentity(box string) (any, error) {
 	var id, name string
 	err := s.store.Reader().QueryRow("SELECT id,address FROM mailbox_ids JOIN addresses USING(box) WHERE box=? AND current=1", box).Scan(&id, &name)
-	return object{"mailbox_id": id, "name": name, "original_address": box}, err
+	result := object{"mailbox_id": id, "name": name, "original_address": box}
+	if err == nil && s.email != nil && validEmail(name+"@"+s.email.domain) {
+		result["email_address"] = name + "@" + s.email.domain
+		result["external_send_enabled"] = s.email.senders[box]
+	}
+	return result, err
 }
 
 type addressMove struct{ From, To string }

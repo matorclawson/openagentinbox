@@ -13,6 +13,8 @@ import (
 )
 
 func (s *server) mailRoutes(add func(string, handler)) {
+	add("GET /api/desk/email/uncertain", s.uncertainMail)
+	add("POST /api/desk/email/reconcile", s.reconcileEmail)
 	add("POST /api/desk/revoke-batch", s.revokeBatch)
 	add("POST /api/desk/addresses", s.reconcile)
 	add("GET /api/desk/accounts", s.accounts)
@@ -21,6 +23,7 @@ func (s *server) mailRoutes(add func(string, handler)) {
 	}
 	for _, a := range []string{"desk", "agent"} {
 		add("POST /api/"+a+"/send", s.send)
+		add("GET /api/"+a+"/email-original/{id}", s.originalEmail)
 		add("GET /api/"+a+"/receipt/{id}", s.receipt)
 		add("POST /api/"+a+"/request", s.requestAction)
 		add("GET /api/"+a+"/alerts", s.alerts)
@@ -55,7 +58,12 @@ func (s *server) accounts(_ http.ResponseWriter, r *http.Request) (any, error) {
 	if e = rs.Err(); e != nil {
 		return nil, e
 	}
-	return object{"operator": s.operator, "agents": names}, nil
+	result := object{"operator": s.operator, "agents": names}
+	if s.email != nil {
+		result["email_domain"] = s.email.domain
+		result["operator_email_send"] = s.email.senders[s.operator]
+	}
+	return result, nil
 }
 func (s *server) credential(_ http.ResponseWriter, r *http.Request) (any, error) {
 
@@ -123,17 +131,43 @@ func (s *server) send(_ http.ResponseWriter, r *http.Request) (any, error) {
 	if e != nil {
 		return nil, e
 	}
-	var q struct{ To, Subject, Body, Key, Intent, ReplyTo string }
+	var q struct {
+		To, Subject, Body, Key, Intent, ReplyTo, FileName string
+		FileData                                          []byte
+	}
 	if e = input(r, &q); e != nil {
 		return nil, e
 	}
 	q.Subject = strings.TrimSpace(q.Subject)
 	q.Body = strings.TrimSpace(q.Body)
-	if !nameRE.MatchString(q.To) || len(q.Subject) == 0 || len([]rune(q.Subject)) > 240 || len(q.Body) == 0 || len([]rune(q.Body)) > 48000 || uuid.Validate(q.Key) != nil {
+	external := strings.Contains(q.To, "@")
+	if external && s.email != nil && strings.HasSuffix(strings.ToLower(q.To), "@"+s.email.domain) && q.ReplyTo == "" {
+		box, err := s.emailBox(r.Context(), q.To)
+		if err != nil {
+			return nil, err
+		}
+		q.To = box
+		external = false
+	}
+	if (q.FileName != "" || q.FileData != nil) && (!external || !fileNameRE.MatchString(q.FileName) || len(q.FileData) > 96<<10 || len(q.FileData) == 0) {
+		return nil, failure{400, "External attachment needs a safe filename and 1 to 98304 bytes"}
+	}
+	if external {
+		if q.ReplyTo != "" {
+			q.To = strings.TrimPrefix(q.To, "external:")
+		}
+		if s.email == nil || !s.email.senders[src] {
+			return nil, failure{403, "External email sending is disabled for this mailbox"}
+		}
+		if !validEmail(q.To) || strings.HasSuffix(strings.ToLower(q.To), "@"+s.email.domain) || strings.ContainsAny(q.Subject, "\r\n\x00") || (q.Intent != "" && q.Intent != "fyi") {
+			return nil, failure{400, "Use an external address, single-line subject and FYI intent"}
+		}
+	}
+	if (!external && !nameRE.MatchString(q.To)) || len(q.Subject) == 0 || len([]rune(q.Subject)) > 240 || len(q.Body) == 0 || len([]rune(q.Body)) > 48000 || uuid.Validate(q.Key) != nil {
 		return nil, failure{400, "Invalid message fields"}
 	}
 
-	if q.To != s.operator {
+	if !external && q.To != s.operator {
 		if e = s.store.Reader().QueryRowContext(r.Context(), "SELECT box FROM addresses WHERE address=?", q.To).Scan(&q.To); e != nil {
 			return nil, e
 		}
@@ -150,19 +184,25 @@ func (s *server) send(_ http.ResponseWriter, r *http.Request) (any, error) {
 	}
 	timestamp := time.Now()
 	msg := deliverystore.Message{ID: uuid.NewString(), Sender: src, Subject: q.Subject, Recipients: []string{q.To}, Priority: priority, Intent: q.Intent, ParentID: q.ReplyTo, Body: []byte(q.Body)}
+	if q.FileName != "" {
+		msg.ExternalPayloadDigest = attachmentDigest(q.FileName, q.FileData)
+	}
 	id, e := s.store.AcceptMail(r.Context(), "console/"+src+"/"+q.Key, msg, timestamp, func(tx *sql.Tx) error {
 		if q.ReplyTo != "" {
 			var parent string
 			if err := tx.QueryRow("SELECT m.sender FROM messages m JOIN deliveries d USING(seq) WHERE m.id=? AND d.seat=?", q.ReplyTo, src).Scan(&parent); err != nil {
 				return err
 			}
-			if parent != q.To {
+			if parent != q.To && !(external && parent == "external:"+q.To) {
 				return failure{400, "Reply must go to the original sender"}
 			}
 			_, err := tx.Exec(`INSERT INTO mail_receipts(id,seat,replied) VALUES(?,?,?) ON CONFLICT(id,seat) DO UPDATE SET replied=coalesce(replied,excluded.replied),state=CASE WHEN state='fyi' THEN state ELSE 'resolved' END,due=NULL`, q.ReplyTo, src, timestamp.UnixMilli())
 			if err != nil {
 				return err
 			}
+		}
+		if external {
+			return s.enqueueLetter(tx, msg, q.FileName, q.FileData)
 		}
 		if q.Intent == "" {
 			return nil
@@ -178,6 +218,12 @@ func (s *server) send(_ http.ResponseWriter, r *http.Request) (any, error) {
 		return nil, failure{409, "Request key already used for different content"}
 	}
 	if e == nil {
+		if external {
+			select {
+			case s.email.wake <- struct{}{}:
+			default:
+			}
+		}
 		s.performance.observe(true, q.To, time.Since(started))
 		s.live.signal()
 	}
@@ -280,7 +326,20 @@ func (s *server) detail(_ http.ResponseWriter, r *http.Request) (any, error) {
 		}
 	}
 	s.performance.observe(false, "", time.Since(started))
-	return object{"id": id, "src": src, "dst": dst, "subject": sub, "body": body, "at": at, "opened": opened, "replied": replied, "state": state, "due": due}, nil
+	result := object{"id": id, "src": src, "dst": dst, "subject": sub, "body": body, "at": at, "opened": opened, "replied": replied, "state": state, "due": due}
+	if strings.HasPrefix(src, "external:") {
+		result["channel"] = "email"
+		result["trust"] = "external"
+		result["original_available"] = actor == dst || strings.HasPrefix(r.URL.Path, "/api/desk/")
+	}
+	if strings.Contains(dst, "@") {
+		var status string
+		if err := s.store.Reader().QueryRowContext(r.Context(), "SELECT state FROM email_outbox WHERE id=?", id).Scan(&status); err != nil {
+			return nil, err
+		}
+		result["email_status"] = status
+	}
+	return result, nil
 }
 
 func (s *server) shareMessage(_ http.ResponseWriter, r *http.Request) (any, error) {
