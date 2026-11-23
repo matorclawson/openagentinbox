@@ -394,3 +394,89 @@ a.letter:hover{background:#faf6f0}
 .receipt-pages{align-items:center}.receipt-pages span{margin-right:auto}
 
 .mail-setup{max-width:58rem}.mail-setup .card{margin:1.2rem 0;padding:1.3rem}.mail-setup form,.mail-setup label{display:grid;gap:.35rem}.mail-setup form{gap:.8rem}.mail-setup form button,.mail-setup button{width:fit-content}.mail-setup input[type=checkbox]{width:auto}.mail-setup p{max-width:70ch}.mail-setup code,.mail-setup pre{white-space:pre-wrap;overflow-wrap:anywhere}.dns-record{padding:1rem 0;border-top:1px solid #d5d9de}.dns-record label{margin:.5rem 0 .25rem}.mail-setup button{margin:.25rem .35rem .25rem 0}
+
+/* Mail desk */
+.shell {--ink:#292632;--muted:#655f70;--accent:#6642aa;--line:#e4e0e9;background:#f6f5f9;color:var(--ink)}
+.shell aside {background:#24212e;color:#f8f5ff}
+aside .brand span{color:#c7b4ff}
+.shell .workspace{background:#302c3c;border-color:#464151}
+.shell .workspace small{color:#c2bacc}
+.shell .primary{background:#6441a3;border-color:transparent;color:white}
+.shell .primary:hover{background:#503483}
+.shell aside>.primary{background:#ddd0ff;color:#32224b}
+.shell nav button,.shell footer button{color:#d5cfde}
+.shell nav button:hover,.shell footer button:hover{background:#343040}
+.shell nav button[aria-current],.shell .directory-list a[aria-current]{background:#433751;color:#f3eaff;box-shadow:inset 2px 0 #c5a0ff}
+.shell .directory-list a:hover{background:#393442;color:white}
+.shell .directory{border-top:1px solid #45404e;padding-top:18px}
+.directory label{font-size:.8rem}
+.shell .directory input{background:#302c39;border-color:#544c60;color:white}
+.shell .directory input::placeholder{color:#b6afc0}
+.shell .desk>header{align-items:center;min-height:54px;background:#faf9fc;border-color:var(--line);font-size:.83rem;text-transform:capitalize}
+.shell .desk>header span,.desk>header svg{color:var(--muted)}
+.desk button,.reader-actions a{min-height:36px;padding:7px 12px;border-radius:8px;font-size:.875rem;line-height:20px}
+.shell :is(button,a,summary):focus-visible{outline:3px solid #8860c7;outline-offset:2px}
+.mail-heading{position:relative;isolation:isolate;overflow:hidden;display:flex;align-items:center;gap:18px;min-height:132px;padding:26px clamp(16px,3vw,36px);border-radius:18px;background:linear-gradient(105deg,#30223f,#4e3765 63%,#7b6198);color:white;box-shadow:0 3px 12px #25153612}
+.mail-heading::after{content:"";z-index:-1;position:absolute;inset:-190% -5% -190% 41%;transform:rotate(-23deg);background:repeating-radial-gradient(ellipse at 85% 55%,transparent 0 13px,#ebd9ff23 14px,transparent 15px 23px);pointer-events:none}
+.mail-emblem{flex:none;display:grid;place-items:center;width:52px;height:52px;border:1px solid #ffffff40;border-radius:15px;background:#ffffff12;color:#eadcff}
+.mail-emblem svg{width:26px;height:26px;stroke-width:1.6}
+.mail-heading h1{font-size:clamp(29px,4vw,44px);margin:0;line-height:1.05}
+.mail-heading p{color:#eaddf3;margin:5px 0 0;font-size:.95rem;overflow-wrap:anywhere}
+.mail-heading>button{margin-left:auto;background:#40304e;color:#fff;border-color:#a28aa9;min-width:36px;padding:7px}
+.mail-panel,.reader{background:white;border:1px solid var(--line);border-radius:15px;box-shadow:0 5px 18px #28203207;margin-top:20px}
+.mail-tabs{display:flex;gap:6px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line)}
+.mail-tabs a,.mail-tabs span,.reader-actions a{display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border-radius:7px;color:var(--muted);font-size:14px;font-weight:550}
+.mail-tabs [aria-current],.mail-tabs span{color:#523287;background:#efe9fa}
+.post-day{margin:0;padding:10px 20px;background:#f7f6f9;font:650 .72rem system-ui;letter-spacing:.055em;color:#63596e;border-bottom:1px solid var(--line)}
+.post-row{position:relative;display:grid;grid-template-columns:36px minmax(0,1fr) auto;gap:14px;align-items:center;padding:14px 20px;border-bottom:1px solid #edeaf0;color:var(--ink)}
+.post-row:hover{background:#f8f5fe;box-shadow:inset 3px 0 #9877c5}
+.post-row:last-child{border-radius:0 0 15px 15px;border-bottom:0}
+.person{width:36px;height:36px;border-radius:12px;display:inline-grid;place-items:center;font:650 12px Space,system-ui;letter-spacing:.03em;flex:none}
+.tint0{color:#594381;background:#eae3f4}.tint1{color:#335c6e;background:#dcecf2}.tint2{color:#76502f;background:#f6e7d6}.tint3{color:#436048;background:#e2eddf}.tint4{color:#774053;background:#f4e1e6}
+.post-main,.post-meta{display:grid;align-content:center;gap:4px}
+.post-main strong{font-size:1rem;line-height:1.35;letter-spacing:-.018em;overflow-wrap:anywhere}
+.correspondent{font-size:.77rem;color:var(--muted);overflow-wrap:anywhere}
+.post-meta{justify-items:end;gap:6px}
+.post-meta time,.byline time{font-size:.78rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.mail-status,.conversation-cue{display:inline-flex;align-items:center;gap:5px;width:fit-content;font-size:.72rem;font-weight:550;line-height:1.4}
+.mail-status{border-radius:20px;padding:3px 8px;color:#544c5f;background:#eeecf2}
+.status-opened{background:#e8eefb;color:#34568a}.status-replied{background:#e1f1e9;color:#2c6046}
+.conversation-cue,.reader-actions a{color:var(--accent)}
+.timeline .post-row::before{content:"";position:absolute;left:37px;top:0;bottom:0;width:1px;background:#ded4e9}
+.timeline .person{z-index:1;outline:4px solid white}
+.mail-panel>button{margin:14px}
+.reader{padding:clamp(19px,4vw,48px);max-width:900px}
+.reader-kicker{display:flex;gap:8px;align-items:center;color:var(--accent);font-size:.82rem;font-weight:600;margin-bottom:14px}
+.reader h1{font-size:clamp(25px,3.3vw,40px);max-width:30ch;overflow-wrap:anywhere}
+.byline{display:flex;gap:10px;align-items:center;margin:22px 0 0;flex-wrap:wrap}
+.byline>div{display:grid;overflow-wrap:anywhere;min-width:0}.byline small{font-size:.8rem;color:var(--muted)}.byline time{margin-left:auto}
+.reader pre.letter-body{border-block:1px solid var(--line);font:1rem/1.75 system-ui;margin:23px 0 15px;padding:24px 0;tab-size:4}
+.reader-actions,.reader .reference{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.reader-actions a{margin-left:auto;background:#f3eff9}
+.reader summary{cursor:pointer;color:#4c435c;font-size:.87rem;font-weight:600;padding:8px 0}
+.reader details p{font-size:.875rem;line-height:1.7}
+.reader .reference{border-block:1px solid var(--line);padding:13px 0;margin:9px 0}
+.reader .reference code{color:var(--muted);font-size:.78rem;margin-right:auto}
+.reader .reply-action{margin-top:12px}
+.mobile-menu{display:none}
+@media(max-width:740px){
+  .shell aside{padding:12px 16px}
+  .shell aside:not(.expanded)>:not(.brand):not(.mobile-menu){display:none}
+  .mobile-menu{display:inline-flex;background:#393243;color:white;border-color:#655773}
+  .shell aside nav{flex-wrap:wrap}.shell aside .directory{width:100%}
+  .mail-heading{min-height:98px;padding:18px;gap:12px}
+  .mail-emblem{width:38px;height:38px;border-radius:11px}
+  .post-row{grid-template-columns:30px minmax(0,1fr) auto;gap:8px;padding:13px 10px}
+  .person{width:30px;height:30px;border-radius:10px;font-size:10px}
+  .post-main strong{font-size:.9rem}.post-day{padding-left:12px}
+  .timeline .post-row::before{left:25px}
+  .post-meta time,.mail-status{font-size:.69rem}
+}
+.desk button.post-row{width:100%;border:0;border-bottom:1px solid #edeaf0;border-radius:0;padding:14px 20px;text-align:left;justify-content:stretch;line-height:inherit}
+.desk button.post-row[aria-expanded=true]{background:#f6f2fb}
+.thread-body{padding:8px 22px 20px clamp(22px,6vw,70px);background:#fcfaff;border-bottom:1px solid var(--line)}
+.thread-body pre{font:inherit;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere}
+.thread-body a{display:inline-flex;margin-top:12px;color:var(--accent);font-weight:550;font-size:.84rem}
+@media(max-width:740px){.desk button.post-row{padding:13px 10px}}
+.reader-actions .reply-action{margin:0}.mail-heading>div{min-width:0}.mail-heading h1{overflow-wrap:anywhere}
+@media(min-width:741px){.shell>aside{position:sticky;top:0;align-self:start;height:100dvh;overflow-y:auto}.shell>aside .directory{min-height:90px;overflow:hidden}.shell>aside .directory-list{min-height:0}}

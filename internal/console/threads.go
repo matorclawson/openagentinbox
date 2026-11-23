@@ -147,12 +147,18 @@ func (s *server) threads(_ http.ResponseWriter, r *http.Request) (any, error) {
 			return nil, failure{400, "Invalid cursor"}
 		}
 	}
-	const fields = "m.seq,m.id,m.sender,CASE WHEN m.sender=? THEN coalesce((SELECT group_concat(seat,', ') FROM deliveries WHERE seq=m.seq),'') ELSE ? END,m.subject,m.created_text,"
-	query := "SELECT " + fields + "h.root,h.n FROM thread_heads h JOIN messages m ON m.seq=h.latest WHERE h.box=? AND h.folder=? AND h.latest<? ORDER BY h.latest DESC LIMIT 41"
-	args := []any{box, box, box, folder, before}
+	const fields = "m.seq,m.id,m.sender,CASE WHEN m.sender=? THEN coalesce((SELECT group_concat(seat,', ') FROM deliveries WHERE seq=m.seq),'') ELSE ? END,m.subject,m.created_text,coalesce(d.accepted_at,0),coalesce(r.opened,0),coalesce(r.replied,0),"
+	// Each page reads only the latest envelope and its recipient-scoped receipt.
+	// For a fan-out send there is no single recipient whose open represents the group.
+	const receipt = ` LEFT JOIN deliveries d ON d.seq=m.seq AND d.seat=CASE WHEN m.sender=? THEN
+ (SELECT min(seat) FROM deliveries WHERE seq=m.seq HAVING count(*)=1) ELSE ? END
+ LEFT JOIN mail_receipts r ON r.id=m.id AND r.seat=d.seat `
+	query := "SELECT " + fields + `h.root,h.n,EXISTS(SELECT 1 FROM thread_heads other WHERE other.box=h.box AND other.root=h.root AND other.folder<>h.folder AND (other.latest<>h.latest OR other.n>1))
+ FROM thread_heads h JOIN messages m ON m.seq=h.latest` + receipt + "WHERE h.box=? AND h.folder=? AND h.latest<? ORDER BY h.latest DESC LIMIT 41"
+	args := []any{box, box, box, box, box, folder, before}
 	if root := r.PathValue("root"); root != "" {
-		query = "SELECT " + fields + "t.root,1 FROM thread_members t JOIN messages m USING(seq) WHERE t.root=? AND t.seq<? AND (m.sender=? OR EXISTS(SELECT 1 FROM deliveries d WHERE d.seq=m.seq AND d.seat=?)) ORDER BY t.seq DESC LIMIT 41"
-		args = []any{box, box, root, before, box, box}
+		query = "SELECT " + fields + "t.root,1,0 FROM thread_members t JOIN messages m USING(seq)" + receipt + "WHERE t.root=? AND t.seq<? AND (m.sender=? OR EXISTS(SELECT 1 FROM deliveries v WHERE v.seq=m.seq AND v.seat=?)) ORDER BY t.seq DESC LIMIT 41"
+		args = []any{box, box, box, box, root, before, box, box}
 	}
 	rows, e := s.store.Reader().QueryContext(r.Context(), query, args...)
 	if e != nil {
@@ -169,10 +175,12 @@ func (s *server) threads(_ http.ResponseWriter, r *http.Request) (any, error) {
 		}
 		var id, src, dst, sub, at, root string
 		var n int
-		if e = rows.Scan(&last, &id, &src, &dst, &sub, &at, &root, &n); e != nil {
+		var received, opened, replied int64
+		var other bool
+		if e = rows.Scan(&last, &id, &src, &dst, &sub, &at, &received, &opened, &replied, &root, &n, &other); e != nil {
 			return nil, e
 		}
-		result = append(result, object{"id": id, "src": src, "dst": dst, "subject": sub, "at": at, "thread": root, "count": n})
+		result = append(result, object{"id": id, "src": src, "dst": dst, "subject": sub, "at": at, "thread": root, "count": n, "conversation": n > 1 || other, "received": received, "opened": opened, "replied": replied})
 	}
 	return object{"rows": result, "next": next}, rows.Err()
 }

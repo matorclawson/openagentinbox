@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState, useRef, type FormEvent } from "react";
 import {
+  Menu, Layers, ChevronRight, MessageSquare,
   Inbox,
   Activity,
   Send,
@@ -14,6 +15,7 @@ import {
   ArrowRight,
   Plus,
 } from "lucide-react";
+import {Avatar, Receipt, MailTime, MailList, useMailClock, type Envelope} from "./mail-ui";
 import {MailSetup} from "./mail-setup";
 import { Workspace, EnrollmentQueue, useWorkspace } from "./live";
 type Session = {
@@ -23,7 +25,7 @@ type Session = {
   linked: boolean;
 };
 type Accounts = { operator: string; agents: string[]; email_domain?: string;operator_email_send?: boolean };
-type Row = {
+type Row = Envelope & {
  thread?:string; count?:number;
   id: string;
   src: string;
@@ -118,6 +120,8 @@ function AddressEditor(){
 export default function Home() {
   const [s, session] = useState<Session | null>(null),
     [acc, accounts] = useState<Accounts | null>(null);
+  const now = useMailClock();
+  const [menu, setMenu] = useState(false);
   const [path, setPath] = useState("/");
   const [filter, setFilter] = useState("");
   const [shareSeat, setShareSeat] = useState("");
@@ -140,7 +144,7 @@ export default function Home() {
   );
   const {data:live,connection}=useWorkspace(s?.name);
   const agentNames=live?.agents.map(([name])=>name)??acc?.agents??[];
-  const newest=live?.mail[0]?.[4];
+  const newest=live?.cursor;
   const generation = useRef(0);
   async function task(fn: () => Promise<void>) {
     work(true);
@@ -243,6 +247,7 @@ export default function Home() {
   function navigate(to: string, replace = false) {
     if (replace) history.replaceState(null, "", to);
     else if (location.pathname !== to) history.pushState({from:location.pathname}, "", to);
+    setMenu(false);
     setPath(to);
     key(""); warn(""); say("");
   }
@@ -377,10 +382,13 @@ export default function Home() {
         <button onClick={() => void task(init)}>Load workspace</button>
       </main>
     );
+  const previousPath = typeof window==="undefined" ? "" : String(history.state?.from??"");
+  const fromBox = /^\/inboxes\/([^/]+)/.exec(previousPath)?.[1];
+  const readerBox = fromBox || (selected?.row.dst.includes("@") || selected?.row.src===acc.operator ? selected?.row.src : selected?.row.dst) || acc.operator;
   return (
     <main className="shell">
-      <aside>
-        <Brand />
+      <aside className={menu?"expanded":""}>
+        <Brand /><button className="mobile-menu" aria-expanded={menu} onClick={()=>setMenu(!menu)}><Menu size={17}/> Mailboxes</button>
         <div className="workspace">
           <small>WORKSPACE</small>
           <strong>{s.name}</strong>
@@ -441,50 +449,25 @@ export default function Home() {
       <section className="desk">
         <header>
           <span>Workspace</span>
-          <span>/</span>
-          OpenAgentInbox
+          <ChevronRight size={14}/>
+          {messageId?"Message":threadId?"Conversation":folder==="inbox"||folder==="sent"?box:folder}
         </header>
         <div className="canvas">
           {feedback}
           {messageId && encodeURIComponent(selected?.row.id ?? "") !== messageId ? (<p>{error ? "Message unavailable." : "Opening message…"}</p>) : selected && messageId ? (
             <>
-              <button onClick={() => history.state?.from ? history.back() : go("inbox",selected.row.dst.split(", ")[0])}>
+              <button onClick={() => history.state?.from ? history.back() : go("inbox",readerBox)}>
                 <ArrowLeft size={16} />
                 Back
               </button>
-              <article className="card detail">
-                <h1>{selected.row.subject}</h1>
-                <p>
-                  {selected.row.src} → {selected.row.dst} ·{" "}
-                  {new Date(selected.row.at).toLocaleString()}
-                </p>
+              <article className="card detail reader">
+                <div className="reader-kicker"><Mail size={16}/>Message</div>
+                <h1>{selected.row.subject||"(No subject)"}</h1>
+                <div className="byline"><Avatar name={selected.row.src}/><div><b>{selected.row.src.replace(/^external:/,"")}</b><small>To {selected.row.dst}</small></div><MailTime value={selected.row.at} now={now} label="Sent"/></div>
                 {selected.row.trust==="external" && <p>Internet email · Sender supplied by the email header.</p>}
-                <pre>{selected.body}</pre>
-                {selected.row.original_available && <button onClick={()=>void task(async()=>{
-                  const data=await api("desk/email-original/"+selected.row.id);
-                  const blob=new Blob([Uint8Array.from(atob(data.base64),c=>c.charCodeAt(0))],{type:"application/octet-stream"});
-                  const url=URL.createObjectURL(blob);const link=document.createElement("a");
-                  link.href=url;link.download=selected.row.id+".eml";link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
-                })}>Download original email (.eml)</button>}
-                {selected.row.email_status && <p>Email transport · {selected.row.email_status}{selected.row.email?.remote_action && <> · Destination reported {selected.row.email.remote_action} ({selected.row.email.remote_status})</>}</p>}
-                <p>Opened by recipient · {selected.row.opened?new Date(selected.row.opened).toLocaleString():"No recorded open"}<br/>First linked reply · {selected.row.replied?new Date(selected.row.replied).toLocaleString():"No recorded reply"}</p>
-                {selected.row.state&&selected.row.state!=="fyi"&&<p>Request · {selected.row.state}{selected.row.due?" · Due "+new Date(selected.row.due).toLocaleString():""}</p>}
-                {selected.row.dst===acc.operator && ["pending","accepted","deferred"].includes(selected.row.state??"")&&<form onSubmit={e=>{e.preventDefault();const fields=new FormData(e.currentTarget);void task(async()=>{const until=String(fields.get("until")||"");await api("desk/request",{id:selected.row.id,action:fields.get("action"),until:until?new Date(until).getTime():0});const row=await api("desk/message/"+messageId);select({row,body:row.body})})}}>
-                <label>Request action<select name="action"><option value="accept">Accept</option><option value="defer">Defer until</option><option value="resolve">Resolve</option><option value="decline">Decline</option></select></label><label>Next update (local time)<input type="datetime-local" name="until"/></label><button>Update request</button></form>}
-                <div className="reference"><code>{selected.row.id}</code>
-                  <button onClick={()=>void task(()=>copy(selected.row.id,"Message ID copied."))}>Copy message ID</button>
-                  <button onClick={()=>void task(()=>copy(location.href,"Message link copied."))}>Copy link</button>
-                </div>
-                <form onSubmit={e=>{e.preventDefault();void task(async()=>{
-                  await api("desk/message/"+messageId+"/share",{seat:shareSeat});
-                  say(shareSeat+" can now read this message by ID.");setShareSeat("");
-                })}}>
-                  <label>Grant read access to an agent<input list="share-seats" value={shareSeat} required onChange={e=>setShareSeat(e.target.value)}/></label>
-                  <datalist id="share-seats">{agentNames.map(n=><option key={n} value={n}/>)}</datalist>
-                  <button disabled={busy}>Grant access</button>
-                </form>
-                {selected.row.src !== acc.operator && (
-                  <button
+                <pre className="letter-body">{selected.body}</pre>
+                <div className="reader-actions">                {selected.row.src !== acc.operator && (
+                  <button className="primary reply-action"
                     onClick={() =>
                       compose(selected.row.src.replace(/^external:/,""), "Re: " + selected.row.subject, selected.row.dst===acc.operator?selected.row.id:"")
                     }
@@ -493,6 +476,30 @@ export default function Home() {
                     Reply
                   </button>
                 )}
+<Receipt row={selected.row}/>{selected.row.thread && <a onClick={follow} href={"/inboxes/"+encodeURIComponent(readerBox)+"/threads/"+encodeURIComponent(selected.row.thread)}><MessageSquare size={15}/>View conversation</a>}</div>
+                {selected.row.original_available && <button onClick={()=>void task(async()=>{
+                  const data=await api("desk/email-original/"+selected.row.id);
+                  const blob=new Blob([Uint8Array.from(atob(data.base64),c=>c.charCodeAt(0))],{type:"application/octet-stream"});
+                  const url=URL.createObjectURL(blob);const link=document.createElement("a");
+                  link.href=url;link.download=selected.row.id+".eml";link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+                })}>Download original email (.eml)</button>}
+                {selected.row.email_status && <p>Email transport · {selected.row.email_status}{selected.row.email?.remote_action && <> · Destination reported {selected.row.email.remote_action} ({selected.row.email.remote_status})</>}</p>}
+                <details className="receipt-details"><summary>Delivery details</summary><p>Opened by {selected.row.dst} · {selected.row.opened?new Date(selected.row.opened).toLocaleString():"No recorded open"}<br/>First linked reply · {selected.row.replied?new Date(selected.row.replied).toLocaleString():"No recorded reply"}</p></details>
+                {selected.row.state&&selected.row.state!=="fyi"&&<p>Request · {selected.row.state}{selected.row.due?" · Due "+new Date(selected.row.due).toLocaleString():""}</p>}
+                {selected.row.dst===acc.operator && ["pending","accepted","deferred"].includes(selected.row.state??"")&&<form onSubmit={e=>{e.preventDefault();const fields=new FormData(e.currentTarget);void task(async()=>{const until=String(fields.get("until")||"");await api("desk/request",{id:selected.row.id,action:fields.get("action"),until:until?new Date(until).getTime():0});const row=await api("desk/message/"+messageId);select({row,body:row.body})})}}>
+                <label>Request action<select name="action"><option value="accept">Accept</option><option value="defer">Defer until</option><option value="resolve">Resolve</option><option value="decline">Decline</option></select></label><label>Next update (local time)<input type="datetime-local" name="until"/></label><button>Update request</button></form>}
+                <div className="reference"><code>{selected.row.id}</code>
+                  <button onClick={()=>void task(()=>copy(selected.row.id,"Message ID copied."))}>Copy message ID</button>
+                  <button onClick={()=>void task(()=>copy(location.href,"Message link copied."))}>Copy link</button>
+                </div>
+                <details className="sharing"><summary>Share access</summary><form onSubmit={e=>{e.preventDefault();void task(async()=>{
+                  await api("desk/message/"+messageId+"/share",{seat:shareSeat});
+                  say(shareSeat+" can now read this message by ID.");setShareSeat("");
+                })}}>
+                  <label>Grant read access to an agent<input list="share-seats" value={shareSeat} required onChange={e=>setShareSeat(e.target.value)}/></label>
+                  <datalist id="share-seats">{agentNames.map(n=><option key={n} value={n}/>)}</datalist>
+                  <button disabled={busy}>Grant access</button>
+                </form></details>
               </article>
             </>
           ) : folder==="mail-setup" ? <MailSetup boxes={[acc.operator,...agentNames]} onChange={async()=>accounts(await api("desk/accounts"))}/> : folder === "activity" ? (
@@ -691,33 +698,18 @@ export default function Home() {
             </>
           ) : (
             <>
-              <div className="heading">
-                <h1>{threadId?"Conversation":folder === "sent" ? "Sent" : "Inbox"}</h1>
-                <button
-                  aria-label="Refresh messages"
-                  disabled={busy}
-                  onClick={() => void task(() => load())}
-                >
-                  <RefreshCw size={17} />
-                </button>
+              <div className="mail-heading">
+                <div className="mail-emblem">{threadId?<Layers/>:folder==="sent"?<Send/>:<Inbox/>}</div>
+                <div><h1>{threadId?(rows[0]?.subject||"Conversation"):folder==="sent"?"Sent":"Inbox"}</h1><p>{threadId?"Conversation · ":""}{box}</p></div>
+                <button aria-label="Refresh messages" disabled={busy} onClick={()=>void task(()=>load())}><RefreshCw size={16}/></button>
               </div>
-              <div className="card mailbox">
-                <div className="toolbar"><a href={"/inboxes/"+encodeURIComponent(box)} onClick={follow}>Inbox</a> <a href={"/inboxes/"+encodeURIComponent(box)+"/sent"} onClick={follow}>Sent</a>
-                  <strong>
-                    {threadId?"Messages for":folder === "sent" ? "Sent by" : "Received by"}
-                  </strong>
-                  <strong>{box}</strong>
+              <div className="mail-panel">
+                <div className="mail-tabs">
+                  <a aria-current={!threadId&&folder==="inbox"?"page":undefined} href={"/inboxes/"+encodeURIComponent(box)} onClick={follow}><Inbox size={15}/>Inbox</a>
+                  <a aria-current={!threadId&&folder==="sent"?"page":undefined} href={"/inboxes/"+encodeURIComponent(box)+"/sent"} onClick={follow}><Send size={15}/>Sent</a>
+                  {threadId && <span><Layers size={15}/>Conversation</span>}
                 </div>
-                {rows.map((r) => (
-                  <a className="letter" key={threadId?r.id:r.thread??r.id} href={threadId||!r.thread?"/messages/"+encodeURIComponent(r.id):"/inboxes/"+encodeURIComponent(box)+"/threads/"+encodeURIComponent(r.thread)} onClick={follow}>
-                    <Mail size={18} />
-                    <span>
-                      <strong>{r.subject||"(No subject)"}{!threadId&&r.count&&r.count>1?" · "+r.count+" in this folder":""}</strong>
-                      <small>{folder === "sent" ? r.dst : r.src}</small>
-                    </span>
-                    <time>{new Date(r.at).toLocaleDateString()}</time>
-                  </a>
-                ))}
+                <MailList key={path} rows={rows} box={box} sent={folder==="sent"} timeline={!!threadId} now={now} follow={follow}/>
                 {!rows.length && (
                   <div className="empty">
                     <Inbox />
