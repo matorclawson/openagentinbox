@@ -13,6 +13,7 @@ import (
 )
 
 func (s *server) mailRoutes(add func(string, handler)) {
+	add("POST /api/desk/revoke-batch", s.revokeBatch)
 	add("POST /api/desk/addresses", s.reconcile)
 	add("GET /api/desk/accounts", s.accounts)
 	for _, v := range []string{"agents", "rotate", "revoke"} {

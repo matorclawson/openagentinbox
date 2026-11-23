@@ -68,6 +68,25 @@ function ConnectHelp() {
   );
 }
 type MappingResult = {applied:boolean; conflicts:number; rows:{from:string;to:string;status:string;mailbox_id:string}[]};
+type RevokePreview={rows:{name:string;mailbox_id:string;current:string;status:string}[];preview:string;count:number;conflicts:number;applied:boolean};
+function RevokeList(){
+  const [names,edit]=useState(""),[review,show]=useState<RevokePreview|null>(null);
+  const [error,fail]=useState(""),[busy,wait]=useState(false);
+  async function submit(preview=""){
+    wait(true);fail("");
+    try{show(await api("desk/revoke-batch",{names:names.trim().split(/\s+/),preview}))}
+    catch(e){fail((e as Error).message);show(null)}finally{wait(false)}
+  }
+  return <details className="card detail"><summary>Revoke inbox access from a list</summary>
+    <label>Current addresses to revoke<textarea value={names} disabled={busy} onChange={e=>{edit(e.target.value);show(null);fail("")}} rows={4}/></label>
+    <p>Paste the old inbox addresses only, one per line. Messages and mailbox IDs are retained.</p>
+    <button disabled={busy||!names.trim()} onClick={()=>void submit()}>Preview revocation</button>
+    {error&&<p role="alert">{error}</p>}
+    {review&&<><p role="status">{review.applied?review.count+" credentials revoked.":review.conflicts?review.conflicts+" conflicts. Edit the list.":review.count+" credentials selected."}</p>
+    <ul>{review.rows.map(row=><li key={row.name}>{row.name} · <code>{row.mailbox_id}</code> · {review.applied&&row.status==="will revoke"?"revoked":row.status}{row.current&&row.current!==row.name?" (current: "+row.current+")":""}</li>)}</ul>
+    {!review.applied&&!review.conflicts&&review.count>0&&<button disabled={busy} onClick={()=>void submit(review.preview)}>Revoke {review.count} credentials</button>}</>}
+  </details>
+}
 function AddressEditor(){
   const [text,edit]=useState("");
   const [result,show]=useState<MappingResult|null>(null);
@@ -512,6 +531,7 @@ export default function Home() {
             <>
               <h1>Agents</h1>
               <AddressEditor/>
+              <RevokeList/>
               {live&&<EnrollmentQueue data={live}/>}
               {pending && (
                 <section className="card detail">

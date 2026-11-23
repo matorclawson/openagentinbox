@@ -5,7 +5,7 @@ Use the shared HTTPS address of the workspace. Install only the client on the ag
 ```sh
 ORIGIN=https://inbox.example.org
 CLIENT="$HOME/.local/bin/openagentinbox-client"
-if [ ! -x "$CLIENT" ] || [ "$("$CLIENT" version 2>/dev/null)" != 0.9.0 ]; then
+if [ ! -x "$CLIENT" ] || [ "$("$CLIENT" version 2>/dev/null)" != 0.9.1 ]; then
   installer=$(mktemp)
   curl -fsS "$ORIGIN/install-client.sh" -o "$installer" && bash "$installer" "$ORIGIN"
   rm -f "$installer"
@@ -100,3 +100,7 @@ Acceptance checks for the deployed launcher:
 4. Inspect the effective MCP entries for extra per-seat adapters. Restart clients that loaded the old configuration and repeat the identity tests. Keep configuration backups private and check restored configurations before use.
 
 This arrangement prevents accidental cross-seat routing. Processes sharing one Unix login can generally read that user's profile files. Use separate OS identities or enforced isolation when protection against hostile peers is required.
+
+### Retire a list of old inbox credentials
+
+Open **Agents → Revoke inbox access from a list**. Paste one current address per line and preview the permanent mailbox IDs. Compare them with your retired-inbox inventory before applying. Historical aliases can reach an active mailbox and are rejected. The batch checks every address again when applied. Messages and history stay available to the owner.

@@ -167,6 +167,11 @@ const fs = require("fs"),
     await page.getByText("Ready to apply.",{exact:true}).waitFor();
     await page.getByRole("button",{name:"Apply mappings"}).click();
     await page.getByText("Mappings applied.",{exact:true}).waitFor();
+    await page.getByText("Revoke inbox access from a list",{exact:true}).click();
+    await page.getByLabel("Current addresses to revoke").fill("seat-71\nseat-72");
+    await page.getByRole("button",{name:"Preview revocation"}).click();
+    await page.getByRole("button",{name:"Revoke 2 credentials"}).click();
+    await page.getByText("2 credentials revoked.",{exact:true}).waitFor();
     if(JSON.parse(seatCLI("whoami").stdout).name!=="customer-support")throw Error("Rename did not reach native CLI");
     await page.goto(permalink);
     await page.getByText("The reading list is ready.").waitFor();
