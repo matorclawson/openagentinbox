@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	dost "github.com/rodriveracom/openagentinbox/third_party/dostoevsky"
+	dost "github.com/rodriveracom/dostoevsky"
 )
 
 // UnreadReader binds one authenticated recipient to its sparse SQLite sequence.

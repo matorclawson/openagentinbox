@@ -44,6 +44,28 @@ export function useWorkspace(owner?: string|null) {
   },[owner]);
   return {data,connection};
 }
+type Sample = {count:number;p95_upper_ms:number};
+type PerformanceSnapshot = {successful_sends:Sample;successful_body_reads:Sample;estimated_recipient_mailboxes:number};
+function MailPerformance(){
+ const [snapshot,setSnapshot]=useState<PerformanceSnapshot|null>(null);
+ const [status,setStatus]=useState("");
+ async function refresh(){
+   setStatus("Loading…");
+   try{
+     const response=await fetch("/api/desk/performance",{cache:"no-store"});
+     if(!response.ok)throw Error();
+     setSnapshot(await response.json());setStatus("");
+   }catch{setStatus("Could not load performance data.")}
+ }
+ return <details className="stream" onToggle={event=>{if(event.currentTarget.open)void refresh()}}>
+   <summary>Mail performance since restart</summary>
+   {snapshot&&<><p>Estimated distinct recipient inboxes · {Math.round(snapshot.estimated_recipient_mailboxes)}</p>
+   <table><thead><tr><th>Successful operations</th><th>Count</th><th>p95 upper bound</th></tr></thead>
+   <tbody>{([["Send",snapshot.successful_sends],["Open message",snapshot.successful_body_reads]] as const).map(([name,v])=><tr key={name}><th scope="row">{name}</th><td>{v.count}</td><td>{v.count?v.p95_upper_ms.toFixed(2)+" ms":"—"}</td></tr>)}</tbody></table></>}
+   {status&&<p role="status">{status}</p>}
+   <button disabled={status==="Loading…"} onClick={()=>void refresh()}>Refresh</button>
+ </details>
+}
 export function Workspace({data,connection,review,openBox}:{data:Live|null;connection:string;review:()=>void;openBox:(name:string)=>void}){
  const active=data?.agents.filter(([,on])=>on).length;
  const feed=[
@@ -57,6 +79,7 @@ export function Workspace({data,connection,review,openBox}:{data:Live|null;conne
     <button onClick={review}><UserRoundPlus/><span>Awaiting approval</span><strong>{data?.pending.length??"—"}</strong><ArrowUpRight size={14}/></button>
     <div><Activity/><span>Listening clients</span><strong>{data?Object.keys(data.watching).length:"—"}</strong></div>
    </div>
+   <MailPerformance/>
    <section className="stream"><h2>Delivery health</h2>
    {data?.probes?.length?data.probes.map(([host,last,incident,count,id])=><p key={id}><strong>{host}</strong> · {incident?"Delivery check overdue":last?"Delivery verified":"Awaiting first check"} · {count} verified seats{last?" · Last check "+new Date(last).toLocaleTimeString():""}</p>):<p>No paired hosts reporting yet.</p>}
    <details><summary>Seat listener checks</summary>{data?.listeners?.map(([seat,at,mode])=><p key={seat}>{seat} · {!at?"No listener check recorded":Date.now()-at>180000?"Check overdue":mode} · {at?new Date(at).toLocaleTimeString():"—"}</p>)}</details>

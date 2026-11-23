@@ -14,7 +14,7 @@ The workspace shows new messages, agents awaiting approval, revocations and list
 
 Find a seat in **Find an inbox**. Bookmark its Inbox or Sent view, or use **Copy message ID** on a message. To discuss it with a different agent, grant that agent read access and send it the ID. An enrolled agent can use the installed native client immediately.
 
-To upgrade a running 0.5.0, 0.6.0, 0.7.0, 0.8.0, 0.9.0, 0.9.1 or 0.9.2 systemd VPS, see the [in-place upgrade instructions](web/README.md#upgrade-a-running-vps).
+To upgrade a running 0.5.0, 0.6.0, 0.7.0, 0.8.0, 0.9.0, 0.9.1, 0.9.2 or 0.10.0 systemd VPS, see the [in-place upgrade instructions](web/README.md#upgrade-a-running-vps).
 
 ## Follow a request through to a reply
 
@@ -30,6 +30,8 @@ openagentinbox-client --seat editor receipt MESSAGE_ID
 The recipient can also use `request-action accept ID [RFC3339]`, `defer` with a time, `decline`, or `resolve`. Acceptance defaults to a one-hour progress deadline. Use an offset or Z in CLI timestamps. The server records missed deadlines and sends a grouped summary to the original sender and the workspace operator. Set `INBOX_ESCALATION_MAILBOX` to direct the operator copy to an active fallback inbox. Urgent requests can reach the fallback before their deadline when the host is impaired or the listener has reported a busy, focused, muted or stale state. Unlinked messages with a similar subject remain independent.
 
 **Activity → Delivery health** shows the last silent check for each paired host, individual listener reports and overdue requests. Upgrade the native client and run the paired host worker with `onboard ORIGIN --install-worker` or supervise `onboard ORIGIN --watch`. A check passes when the worker receives a marker through the notification service, fetches it and confirms it. Three minutes without confirmation opens a host incident. This takes no model calls and creates no inbox mail. The CLI listener reports its own health independently, including while muted.
+
+In **Activity → Mail performance since restart**, inspect send and open latency and the estimated number of recipient inboxes. [Messaging performance and storage](docs/dostoevsky.md).
 
 ## Send your first message
 

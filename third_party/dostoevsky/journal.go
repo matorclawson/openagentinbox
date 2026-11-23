@@ -19,9 +19,10 @@ var crcTable = crc32.MakeTable(crc32.Castagnoli)
 var signature = []byte("DOST0001")
 
 type entry struct {
-	Config *Config     `json:",omitempty"`
-	Record *Record     `json:",omitempty"`
-	Check  *checkpoint `json:",omitempty"`
+	Config *Config        `json:",omitempty"`
+	Record *Record        `json:",omitempty"`
+	Seed   *retentionSeed `json:",omitempty"`
+	Check  *checkpoint    `json:",omitempty"`
 }
 type location struct {
 	at   int64
@@ -29,6 +30,7 @@ type location struct {
 }
 type journal struct {
 	file   *os.File
+	lock   *os.File
 	end    int64
 	failed error
 }
@@ -38,12 +40,22 @@ func openJournal(dir string) (*journal, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
+	lock, err := os.OpenFile(filepath.Join(dir, "journal.lock"), os.O_RDWR|os.O_CREATE, 0600)
+	if err != nil {
+		return nil, err
+	}
+	if err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		lock.Close()
+		return nil, fmt.Errorf("lock data directory: %w", err)
+	}
 	f, err := os.OpenFile(filepath.Join(dir, "journal.v1"), os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
+		lock.Close()
 		return nil, err
 	}
 	if err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		f.Close()
+		lock.Close()
 		return nil, fmt.Errorf("lock data directory: %w", err)
 	}
 	d, err := os.Open(dir)
@@ -53,9 +65,10 @@ func openJournal(dir string) (*journal, error) {
 	}
 	if err != nil {
 		f.Close()
+		lock.Close()
 		return nil, err
 	}
-	return &journal{file: f}, nil
+	return &journal{file: f, lock: lock}, nil
 }
 
 func (j *journal) append(e entry) (location, error) {
@@ -63,29 +76,42 @@ func (j *journal) append(e entry) (location, error) {
 	if j.failed != nil {
 		return loc, j.failed
 	}
-	b, err := json.Marshal(e)
+	frame, err := encodeFrame(e)
 	if err != nil {
 		return loc, err
 	}
+	loc = location{j.end + 20, len(frame) - 20}
+	return loc, j.writeFrames(frame)
+}
+func encodeFrame(e entry) ([]byte, error) {
+	b, err := json.Marshal(e)
+	if err != nil {
+		return nil, err
+	}
 	if len(b) > maxFrame {
-		return loc, ErrLimit
+		return nil, ErrLimit
 	}
 	h := make([]byte, 20, 20+len(b))
 	copy(h, signature)
 	binary.BigEndian.PutUint32(h[8:], uint32(len(b)))
 	binary.BigEndian.PutUint32(h[12:], crc32.Checksum(b, crcTable))
 	binary.BigEndian.PutUint32(h[16:], crc32.Checksum(h[:16], crcTable))
-	_, err = j.file.WriteAt(append(h, b...), j.end)
+	return append(h, b...), nil
+}
+func (j *journal) writeFrames(frames []byte) error {
+	if j.failed != nil {
+		return j.failed
+	}
+	_, err := j.file.WriteAt(frames, j.end)
 	if err == nil {
 		err = j.file.Sync()
 	}
 	if err != nil {
 		j.failed = fmt.Errorf("journal write requires reopen: %w", err)
-		return loc, j.failed
+		return j.failed
 	}
-	loc = location{j.end + 20, len(b)}
-	j.end += int64(20 + len(b))
-	return loc, nil
+	j.end += int64(len(frames))
+	return nil
 }
 func (j *journal) read(loc location) (entry, error) {
 	var e entry
@@ -145,3 +171,5 @@ func (j *journal) recover(apply func(entry, location) error) error {
 	}
 	return nil
 }
+
+func (j *journal) close() error { return errors.Join(j.file.Close(), j.lock.Close()) }

@@ -118,6 +118,7 @@ func (s *server) actor(r *http.Request) (string, error) {
 	return "", failure{401, "Invalid agent credential"}
 }
 func (s *server) send(_ http.ResponseWriter, r *http.Request) (any, error) {
+	started := time.Now()
 	src, e := s.actor(r)
 	if e != nil {
 		return nil, e
@@ -149,7 +150,7 @@ func (s *server) send(_ http.ResponseWriter, r *http.Request) (any, error) {
 	}
 	timestamp := time.Now()
 	msg := deliverystore.Message{ID: uuid.NewString(), Sender: src, Subject: q.Subject, Recipients: []string{q.To}, Priority: priority, Intent: q.Intent, ParentID: q.ReplyTo, Body: []byte(q.Body)}
-	id, e := s.store.AcceptWithReceipt(r.Context(), "console/"+src+"/"+q.Key, msg, timestamp, func(tx *sql.Tx) error {
+	id, e := s.store.AcceptMail(r.Context(), "console/"+src+"/"+q.Key, msg, timestamp, func(tx *sql.Tx) error {
 		if q.ReplyTo != "" {
 			var parent string
 			if err := tx.QueryRow("SELECT m.sender FROM messages m JOIN deliveries d USING(seq) WHERE m.id=? AND d.seat=?", q.ReplyTo, src).Scan(&parent); err != nil {
@@ -177,6 +178,7 @@ func (s *server) send(_ http.ResponseWriter, r *http.Request) (any, error) {
 		return nil, failure{409, "Request key already used for different content"}
 	}
 	if e == nil {
+		s.performance.observe(true, q.To, time.Since(started))
 		s.live.signal()
 	}
 	return object{"id": id}, e
@@ -242,6 +244,7 @@ func (s *server) list(_ http.ResponseWriter, r *http.Request) (any, error) {
 	return object{"rows": result, "next": next}, rs.Err()
 }
 func (s *server) detail(_ http.ResponseWriter, r *http.Request) (any, error) {
+	started := time.Now()
 	actor, e := s.actor(r)
 	if e != nil {
 		return nil, e
@@ -252,31 +255,31 @@ func (s *server) detail(_ http.ResponseWriter, r *http.Request) (any, error) {
 	}
 
 	var src, dst, sub, body, at string
-	query := "SELECT m.sender,d.seat,m.subject,m.body,m.created_text FROM messages m JOIN deliveries d USING(seq) WHERE m.id=?"
+	var opened, replied, due int64
+	var state string
+	query := `SELECT m.sender,d.seat,m.subject,m.body,m.created_text,coalesce(r.opened,0),coalesce(r.replied,0),coalesce(r.state,'fyi'),coalesce(r.due,0) FROM messages m JOIN deliveries d USING(seq) LEFT JOIN mail_receipts r ON r.id=m.id AND r.seat=d.seat WHERE m.id=?`
 	args := []any{id}
 	if strings.HasPrefix(r.URL.Path, "/api/agent/") {
 		query += " AND (d.seat=? OR EXISTS(SELECT 1 FROM message_readers WHERE id=m.id AND seat=?))"
 		args = append(args, actor, actor)
 	}
-	e = s.db.QueryRowContext(r.Context(), query, args...).Scan(&src, &dst, &sub, &body, &at)
+	e = s.db.QueryRowContext(r.Context(), query, args...).Scan(&src, &dst, &sub, &body, &at, &opened, &replied, &state, &due)
 	if e != nil {
 		return nil, e
 	}
-	if actor == dst {
-		res, err := s.db.ExecContext(r.Context(), `INSERT INTO mail_receipts(id,seat,opened) VALUES(?,?,?) ON CONFLICT(id,seat) DO UPDATE SET opened=excluded.opened WHERE opened IS NULL`, id, dst, now())
+	if actor == dst && opened == 0 {
+		err := s.db.QueryRowContext(r.Context(), `INSERT INTO mail_receipts(id,seat,opened) VALUES(?,?,?) ON CONFLICT(id,seat) DO UPDATE SET opened=excluded.opened WHERE opened IS NULL RETURNING opened,coalesce(replied,0),state,coalesce(due,0)`, id, dst, now()).Scan(&opened, &replied, &state, &due)
+		if errors.Is(err, sql.ErrNoRows) {
+			// Another recipient fetch won the race to record the first open.
+			err = s.db.QueryRowContext(r.Context(), "SELECT opened,coalesce(replied,0),state,coalesce(due,0) FROM mail_receipts WHERE id=? AND seat=?", id, dst).Scan(&opened, &replied, &state, &due)
+		} else if err == nil {
+			s.live.signal()
+		}
 		if err != nil {
 			return nil, err
 		}
-		if n, _ := res.RowsAffected(); n > 0 {
-			s.live.signal()
-		}
 	}
-	var opened, replied, due int64
-	state := "fyi"
-	e = s.db.QueryRowContext(r.Context(), "SELECT coalesce(opened,0),coalesce(replied,0),state,coalesce(due,0) FROM mail_receipts WHERE id=? AND seat=?", id, dst).Scan(&opened, &replied, &state, &due)
-	if e != nil && !errors.Is(e, sql.ErrNoRows) {
-		return nil, e
-	}
+	s.performance.observe(false, "", time.Since(started))
 	return object{"id": id, "src": src, "dst": dst, "subject": sub, "body": body, "at": at, "opened": opened, "replied": replied, "state": state, "due": due}, nil
 }
 

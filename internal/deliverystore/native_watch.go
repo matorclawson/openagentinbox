@@ -4,7 +4,7 @@ import (
 	"errors"
 	"sync"
 
-	dost "github.com/rodriveracom/openagentinbox/third_party/dostoevsky"
+	dost "github.com/rodriveracom/dostoevsky"
 )
 
 const (

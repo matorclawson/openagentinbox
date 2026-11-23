@@ -82,6 +82,7 @@ var (
 )
 
 type Store struct {
+	mailWrites     mailWriteQueue
 	insertDelivery *sql.Stmt
 	selectUnread   *sql.Stmt
 	watch          watchHub

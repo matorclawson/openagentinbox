@@ -358,3 +358,21 @@ test("recipient detail records a first open, linked replies close the request at
  assert.equal((await post(a,"/api/desk/send",{...original,intent:"request"},owner)).statusCode,409);
  }finally{await a.close();rmSync(dir,{recursive:true})}
 });
+
+test("performance diagnostics count successful operations and keep concurrent opens idempotent",async()=>{
+ const dir=fixture(),a=await service({dir,origin});
+ try{
+  const owner=cookie(await post(a,"/api/setup",{username:"owner",password:"temporary-password",code:readFileSync(join(dir,"setup-code"),"utf8")}));
+  const {credential}=(await post(a,"/api/desk/agents",{name:"worker"},owner)).json();
+  const payload={to:"worker",key:randomUUID(),subject:"Review",body:"Read concurrently"};
+  const id=(await post(a,"/api/desk/send",payload,owner)).json().id;
+  await post(a,"/api/desk/send",payload,owner);
+  const get=()=>a.inject({url:"/api/agent/message/"+id,headers:{authorization:"Bearer "+credential}});
+  const opens=await Promise.all(Array.from({length:16},get));const stamp=opens[0].json().opened;
+  assert.ok(stamp>0);assert.ok(opens.every(r=>r.statusCode===200&&r.json().opened===stamp));
+  assert.equal((await a.inject({url:"/api/desk/performance"})).statusCode,401);
+  const stats=(await a.inject({url:"/api/desk/performance",headers:{cookie:owner}})).json();
+  assert.equal(stats.successful_sends.count,2);assert.equal(stats.successful_body_reads.count,16);
+  assert.equal(Math.round(stats.estimated_recipient_mailboxes),1);assert.ok(stats.successful_body_reads.p95_upper_ms>0);
+ }finally{await a.close();rmSync(dir,{recursive:true})}
+});

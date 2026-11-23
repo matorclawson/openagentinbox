@@ -39,6 +39,7 @@ func (f failure) Error() string { return f.msg }
 
 type handler func(http.ResponseWriter, *http.Request) (any, error)
 type server struct {
+	performance                                                  mailPerformance
 	trustedProxy                                                 string
 	live                                                         changes
 	peerLimit                                                    int
@@ -202,7 +203,7 @@ func Run() error {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		json.NewEncoder(w).Encode(object{"product": "openagentinbox", "version": "0.10.0", "instance": instance, "setup": n == 0})
+		json.NewEncoder(w).Encode(object{"product": "openagentinbox", "version": "0.10.1", "instance": instance, "setup": n == 0})
 	})
 	s.live.draining = make(chan struct{})
 	s.routes(mux)
@@ -293,6 +294,7 @@ func (s *server) routes(m *http.ServeMux) {
 	s.liveRoutes(add)
 	s.pairRoutes(add)
 	s.mailRoutes(add)
+	add("GET /api/desk/performance", func(_ http.ResponseWriter, _ *http.Request) (any, error) { return s.performance.snapshot(), nil })
 	s.enrollRoutes(add)
 }
 func (s *server) issue(w http.ResponseWriter, exp int64, delegation any) error {

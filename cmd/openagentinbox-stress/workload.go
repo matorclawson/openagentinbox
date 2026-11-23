@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
+	"github.com/rodriveracom/dostoevsky/sketch"
 	"net/http"
 	"net/http/cookiejar"
 	"os"
@@ -24,41 +24,20 @@ type latency struct {
 	P50ms, P95ms, P99ms, MaxMs float64
 }
 type hist struct {
-	buckets [480]int64
-	n       int64
+	samples sketch.LatencyHistogram
 	max     time.Duration
 }
 
 func (h *hist) add(d time.Duration) {
-	idx := int(math.Ceil(math.Log1p(float64(d.Microseconds())) / math.Log(1.05)))
-	if idx >= len(h.buckets) {
-		idx = len(h.buckets) - 1
-	}
-	if idx < 0 {
-		idx = 0
-	}
-	h.buckets[idx]++
-	h.n++
-	if d > h.max {
-		h.max = d
-	}
-}
-func (h *hist) quant(q float64) float64 {
-	if h.n == 0 {
-		return 0
-	}
-	target := int64(math.Ceil(q * float64(h.n)))
-	var n int64
-	for i, x := range h.buckets {
-		n += x
-		if n >= target {
-			return math.Min(float64(h.max)/1e6, (math.Pow(1.05, float64(i))-1)/1000)
-		}
-	}
-	return float64(h.max) / 1e6
+	h.samples.Observe(d)
+	h.max = max(h.max, d)
 }
 func (h *hist) summary() latency {
-	return latency{h.n, h.quant(.5), h.quant(.95), h.quant(.99), float64(h.max) / 1e6}
+	ms := func(p int) float64 {
+		bound, _ := h.samples.PercentileUpper(p)
+		return float64(min(bound, h.max)) / float64(time.Millisecond)
+	}
+	return latency{int64(h.samples.Count()), ms(50), ms(95), ms(99), float64(h.max) / float64(time.Millisecond)}
 }
 
 type result struct {
