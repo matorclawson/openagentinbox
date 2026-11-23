@@ -107,3 +107,20 @@ html[data-palette=light]{color-scheme:light}
 .time-branch strong small{display:block;margin-top:2px;color:var(--muted);font:500 .73rem var(--display)}
 .time-outline .time-branch[data-level=hour][aria-expanded=true]{position:sticky;top:0;z-index:3;background:color-mix(in srgb,var(--teal) 12%,var(--paper))}
 .outline-messages .thread-nav{position:static}
+
+/* Identity and controls live in the toolbar; the subject and counts belong to the conversation. */
+.shell .desk>header.conversation-chrome{display:grid;grid-template-columns:minmax(0,1fr) 48px;gap:16px;align-items:center;padding:5px 5%;text-transform:none;background:var(--color-card)}
+.conversation-chrome .conversation-inbox{justify-self:start;display:flex;align-items:center;gap:10px;min-height:48px;max-width:100%;min-width:0;color:var(--ink);text-decoration:none}
+.conversation-inbox>svg{flex:none}.conversation-inbox>span{min-width:0;display:grid;gap:1px}
+.conversation-inbox small,.conversation-kind{font:600 .69rem/1.2 var(--display);text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.conversation-inbox strong{font:600 .94rem/1.35 var(--display);color:var(--ink);overflow-wrap:anywhere}
+.conversation-inbox:hover strong,.conversation-inbox:focus-visible strong{text-decoration:underline;text-underline-offset:3px}
+.conversation-chrome button{width:48px;min-height:48px;justify-self:end}
+.conversation-heading{display:grid;gap:8px;min-width:0;margin:0 0 18px}
+.conversation-heading .conversation-kind{margin:0;color:var(--muted)}
+.conversation-heading h1{margin:0;font:650 clamp(1.85rem,3vw,2.65rem)/1.12 var(--display);letter-spacing:-.045em;color:var(--ink);overflow-wrap:anywhere}
+.conversation-counts{display:flex;align-items:stretch;flex-wrap:wrap;gap:10px 0;margin:8px 0 0;padding:0}
+.conversation-counts>div{min-width:0;max-width:100%;padding-right:20px}.conversation-counts>div+div{border-left:1px solid var(--line);padding-left:20px}
+.conversation-counts dt{display:flex;align-items:center;gap:4px;color:var(--muted);font:500 .8rem/1.4 var(--display)}
+.conversation-counts dd{margin:1px 0 0;font:600 1.2rem/1.25 var(--display);font-variant-numeric:tabular-nums;color:var(--ink);white-space:nowrap}
+@media(max-width:740px){.shell .desk>header.conversation-chrome{padding:4px 14px}.conversation-heading{gap:6px}.conversation-counts{display:flex;column-gap:16px}.conversation-counts>div,.conversation-counts>div+div{border:0;padding:0}}

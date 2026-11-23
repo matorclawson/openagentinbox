@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useRef, type FormEvent } from "react";
 import {
-  Settings, Settings2, Menu, Layers, ChevronRight, MessageSquare,
+  Settings, Settings2, Menu, Layers, ArrowDownLeft, ArrowUpRight, ChevronRight, MessageSquare,
   Inbox,
   Activity,
   Send,
@@ -146,7 +146,7 @@ export default function Home() {
     navigate(pathname+"?period="+period+(period==="all"?"":"&start="+time),replace)
   }
   const after=params.get("after")??"", anchor=params.get("atSeq")??"";
-  const [threadInfo,setThreadInfo]=useState({newer:"",title:"",received:0,sent:0});
+  const [threadInfo,setThreadInfo]=useState({key:"",newer:"",title:"",received:0,sent:0});
   function browse(query:string,pending:boolean,page="",direction="before"){
     const params=new URLSearchParams();
     if(query)params.set("q",query);
@@ -231,7 +231,10 @@ export default function Home() {
         const permanent=pathname+"?atSeq="+encodeURIComponent(data.anchor);
         history.replaceState(history.state,"",permanent);setPath(permanent);
       }
-      setThreadInfo({newer:data.newer??"",title:data.title??"",received:data.inbox_count??0,sent:data.sent_count??0});
+      setThreadInfo(previous=>{
+        if (data.title===undefined && previous.key===pathname) return {...previous,newer:data.newer??""};
+        return {key:data.title===undefined?"":pathname,newer:data.newer??"",title:data.title??"",received:data.inbox_count??0,sent:data.sent_count??0};
+      });
       next(data.next);
     }
   }
@@ -421,6 +424,10 @@ export default function Home() {
   const previousPath = typeof window==="undefined" ? "" : String(history.state?.from??"");
   const fromBox = /^\/inboxes\/([^/?]+)/.exec(previousPath)?.[1];
   const readerBox = fromBox || (selected?.row.dst.includes("@") || selected?.row.src===acc.operator ? selected?.row.src : selected?.row.dst) || acc.operator;
+  const currentThread=threadInfo.key===pathname?threadInfo:null;
+  const titleText=currentThread?.title.trim()??"";
+  const title=splitMail(titleText).subject||titleText.split(/\r?\n/).find(line=>line.trim()&&!/^(?:Priority|Final|Kind|Record-Ref|Record-Branch|Probe|Auto): /.test(line))||"Untitled conversation";
+  function refreshMail(){setRevision(n=>n+1);void task(()=>load())}
   function mailRows(){return <>
                 {threadId && (cursor||threadInfo.newer) && <nav className="thread-nav" aria-label="Messages in this window">
                   <span>{term?"Search results":zoom?"Newest first":"All messages"}</span>
@@ -505,11 +512,15 @@ export default function Home() {
         </footer>
       </aside>
       <section className="desk">
-        <header>
-          <span>Workspace</span>
-          <ChevronRight size={14}/>
-          {messageId?"Message":threadId?"Conversation":folder==="inbox"||folder==="sent"?box:folder}
-        </header>
+        {threadId?<header className="conversation-chrome">
+          <a className="conversation-inbox" href={"/inboxes/"+box} onClick={follow}>
+            <Inbox size={19} aria-hidden="true"/><span><small>Inbox</small><strong>{box}</strong></span>
+          </a>
+          <button type="button" aria-label="Refresh messages" title="Refresh messages" disabled={busy} onClick={refreshMail}><RefreshCw size={17}/></button>
+        </header>:<header>
+          <span>Workspace</span><ChevronRight size={14}/>
+          {messageId?"Message":folder==="inbox"||folder==="sent"?box:folder}
+        </header>}
         <div className="canvas">
           {feedback}
           {messageId && encodeURIComponent(selected?.row.id ?? "") !== messageId ? (<p>{error ? "Message unavailable." : "Opening message…"}</p>) : selected && messageId ? (
@@ -755,10 +766,17 @@ export default function Home() {
             </>
           ) : (
             <>
-              <div className="mail-heading">
-                <div><h1>{threadId?(splitMail(threadInfo.title).subject||splitMail(threadInfo.title).lead||"Conversation"):folder==="sent"?"Sent":"Inbox"}</h1><p>{threadId?"Conversation · ":""}{box}{threadId && threadInfo.received+threadInfo.sent>0 && <> · {threadInfo.received.toLocaleString()} received · {threadInfo.sent.toLocaleString()} sent</>}</p></div>
-                <button aria-label="Refresh messages" disabled={busy} onClick={()=>{setRevision(n=>n+1);void task(()=>load())}}><RefreshCw size={16}/></button>
-              </div>
+              {threadId?<section className="conversation-heading" aria-labelledby="conversation-subject">
+                <p className="conversation-kind">Conversation</p>
+                <h1 id="conversation-subject">{currentThread?title:busy?"Loading conversation…":"Conversation"}</h1>
+                {currentThread && <dl className="conversation-counts" aria-label="Messages in this conversation">
+                  <div><dt><ArrowDownLeft size={15} aria-hidden="true"/>Received</dt><dd>{currentThread.received.toLocaleString()}</dd></div>
+                  <div><dt><ArrowUpRight size={15} aria-hidden="true"/>Sent</dt><dd>{currentThread.sent.toLocaleString()}</dd></div>
+                </dl>}
+              </section>:<div className="mail-heading">
+                <div><h1>{folder==="sent"?"Sent":"Inbox"}</h1><p>{box}</p></div>
+                <button aria-label="Refresh messages" disabled={busy} onClick={refreshMail}><RefreshCw size={16}/></button>
+              </div>}
               <div className="mail-panel">
                 <MailTools thread={!!threadId} query={term} requests={requests} sent={folder==="sent"} compact={compact} toggle={toggleDensity} apply={browse}/>
                 {isOutline?<ThreadTime key={box+"/"+threadId} api={"/api/desk/threads/"+threadId+"?box="+encodeURIComponent(box)} level={level} at={level?Number(start):0} choose={chooseTime} revision={revision}>{mailRows()}</ThreadTime>:<>{threadId && <button onClick={()=>chooseTime("all",0)}>Conversation timeline</button>}{mailRows()}</>}

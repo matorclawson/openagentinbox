@@ -32,7 +32,9 @@ def check_thread(page,url,root,tokens):
     page.get_by_role("heading",name="Delivery planning").wait_for()
     page.locator(".outline-messages .post-row").first.wait_for()
     assert 0<page.locator(".timeline .post-row").count()<=40
-    assert "5,000 received" in page.locator(".mail-heading").inner_text()
+    assert page.locator(".conversation-counts dt").all_inner_texts()==["Received","Sent"]
+    assert page.locator(".conversation-counts dd").all_inner_texts()==["5,000","5,000"]
+    assert page.locator(".conversation-inbox").get_attribute("href")=="/inboxes/architect"
     def shot(name):
         dest=os.getenv("INBOX_TEST_PREVIEWS")
         if dest:page.screenshot(path=str(Path(dest)/(name+".png")))
@@ -46,6 +48,38 @@ def check_thread(page,url,root,tokens):
             rect=node.bounding_box()
             assert rect and rect["width"]>=48 and rect["height"]>=48
         assert page.evaluate("document.documentElement.scrollWidth<=innerWidth")
+    page.evaluate("window.scrollTo(0,0)")
+    shot("conversation-phone")
+    page.set_viewport_size({"width":1440,"height":910})
+    shot("conversation-desktop")
+    # Exercise realistic worst-case data via the normal UI and a disposable API fixture.
+    long_box="infrastructure-release-observability-maintainer"
+    long_title="Release review for the international operations team — "+"x"*120
+    def header_fixture(intercept):
+        response=intercept.fetch(url=intercept.request.url.replace(long_box,"architect"))
+        data=response.json()
+        if "title" in data:data.update(title=long_title,inbox_count=123456789,sent_count=98765432)
+        intercept.fulfill(response=response,json=data)
+    page.route("**/api/desk/threads/**",header_fixture)
+    page.goto(url+route.replace("/architect/","/"+long_box+"/")+"?period=all")
+    page.get_by_role("heading",name=long_title,exact=True).wait_for()
+    for width in (320,390,768,1440):
+        page.set_viewport_size({"width":width,"height":844})
+        assert page.locator(".conversation-inbox strong").inner_text()==long_box
+        assert page.locator(".conversation-counts dd").all_inner_texts()==["123,456,789","98,765,432"]
+        assert page.evaluate("""() => {
+          const bounds=s=>document.querySelector(s).getBoundingClientRect();
+          const name=bounds('.conversation-inbox'),action=bounds('.conversation-chrome button'),title=bounds('.conversation-heading h1');
+          const metrics=[...document.querySelectorAll('.conversation-counts dd')];
+          return name.right+4<=action.left && title.top>=action.bottom && metrics.every(el=>{
+            const r=document.createRange();r.selectNodeContents(el);
+            return r.getClientRects().length===1 && r.getBoundingClientRect().right<=el.getBoundingClientRect().right+1
+          }) && document.documentElement.scrollWidth<=innerWidth
+        }""")
+        if width==320:shot("header-stress-320")
+    page.unroute("**/api/desk/threads/**",header_fixture)
+    page.goto(url+route);selected("hour").wait_for()
+    page.set_viewport_size({"width":390,"height":844})
     selected("month").tap()
     page.wait_for_function("location.search.includes('period=all')")
     assert page.locator(".time-branch[data-level=week]").count()==0
