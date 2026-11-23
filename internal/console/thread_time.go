@@ -1,6 +1,7 @@
 package console
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 	"strconv"
@@ -127,6 +128,23 @@ func (s *server) threadTime(r *http.Request, box, root string) (any, error) {
 			}
 		}
 	}
+	meta, err := threadMetadata(ctx, tx, root, box)
+	if err != nil {
+		return nil, err
+	}
+	meta["rows"] = result
+	meta["next"] = older
+	meta["newer"] = newer
+	meta["buckets"] = buckets
+	return meta, nil
+}
+
+type metadataReader interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func threadMetadata(ctx context.Context, tx metadataReader, root, box string) (object, error) {
+	var err error
 	var title string
 	err = tx.QueryRowContext(ctx, "SELECT coalesce(nullif(m.subject,''),substr(m.display_body,1,512)) FROM thread_members t CROSS JOIN messages m USING(seq) WHERE t.root=? AND (m.sender=? OR EXISTS(SELECT 1 FROM deliveries d WHERE d.seq=t.seq AND d.seat=?)) ORDER BY t.seq LIMIT 1", root, box, box).Scan(&title)
 	if err != nil && err != sql.ErrNoRows {
@@ -136,5 +154,5 @@ func (s *server) threadTime(r *http.Request, box, root string) (any, error) {
 	if err = tx.QueryRowContext(ctx, "SELECT coalesce(sum(CASE folder WHEN 'inbox' THEN n END),0),coalesce(sum(CASE folder WHEN 'sent' THEN n END),0) FROM thread_heads WHERE box=? AND root=?", box, root).Scan(&in, &out); err != nil {
 		return nil, err
 	}
-	return object{"rows": result, "next": older, "newer": newer, "buckets": buckets, "title": title, "inbox_count": in, "sent_count": out}, nil
+	return object{"title": title, "inbox_count": in, "sent_count": out}, nil
 }

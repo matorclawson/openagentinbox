@@ -1,65 +1,79 @@
-import {useEffect, useRef, useState} from "react";
-import {ArrowUpLeft, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Clock, X} from "lucide-react";
+import {useEffect,useRef,useState,type ReactNode} from "react";
+import {ChevronDown,ChevronRight} from "lucide-react";
 
-export const HOUR=3600000, DAY=24*HOUR;
-const spans={hour:HOUR,day:DAY,month:30*DAY};
-export type Scale=keyof typeof spans;
-const date=new Intl.DateTimeFormat(undefined,{timeZone:"UTC",day:"numeric",month:"short"});
-const weekday=new Intl.DateTimeFormat(undefined,{timeZone:"UTC",weekday:"long"});
-const time=new Intl.DateTimeFormat(undefined,{timeZone:"UTC",hour:"2-digit",minute:"2-digit",hourCycle:"h23"});
-const dayStart=(v:number)=>Math.floor(v/DAY)*DAY;
-const bands=["Overnight","Morning","Afternoon","Evening"];
-function messages(n:number){return n.toLocaleString()+(n===1?" message":" messages")}
-
-export function ThreadTime({scale,start,counts,choose}:{scale:Scale|"";start:number;counts:number[];choose:(scale:Scale|"",start:number)=>void}){
- const now=Date.now(), span=scale?spans[scale]:0, end=start+span;
- const valid=span>0 && Number.isFinite(start) && start>=0 && end<253402300800000;
- const focus=valid?Math.min(end-1,now):now;
- const dialog=useRef<HTMLDialogElement>(null);
- const trigger=useRef<HTMLButtonElement>(null);
- const heading=useRef<HTMLHeadingElement>(null);
- const [band,setBand]=useState<number|null>(null);
- const focusAfterChange=useRef(false);
+export const HOUR=3600000,DAY=24*HOUR;
+export type Level="all"|"month"|"week"|"day"|"band"|"hour";
+type Item={start:number;count:number;latest:number};
+const levels:Level[]=["all","month","week","day","band","hour"];
+const utc=(date:number,options:Intl.DateTimeFormatOptions)=>new Date(date).toLocaleDateString(undefined,{...options,timeZone:"UTC"});
+const monthStart=(at:number)=>{const d=new Date(at);return Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),1)};
+const dayStart=(at:number)=>Math.floor(at/DAY)*DAY;
+const weekStart=(at:number)=>Math.max(monthStart(at),dayStart(at)-(new Date(at).getUTCDay()+6)%7*DAY);
+const bandStart=(at:number)=>Math.floor(at/(6*HOUR))*6*HOUR;
+const hours=(at:number)=>new Date(at).toISOString().slice(11,16);
+const formatDay=(at:number)=>utc(at,{month:"short",day:"numeric"});
+function group(items:Item[],key:(at:number)=>number){
+ const counts=new Map<number,number>();
+ for(const item of items){const start=key(item.start);counts.set(start,(counts.get(start)??0)+item.count)}
+ return Array.from(counts,([start,count])=>({start,count,latest:start}));
+}
+function useGroups(url:string){
+ const [data,set]=useState({url:"",items:[] as Item[],next:0,error:false});
+ const [attempt,retry]=useState(0);
  useEffect(()=>{
-   dialog.current?.close();setBand(null);
-   if(focusAfterChange.current){heading.current?.focus({preventScroll:true});focusAfterChange.current=false}
- },[scale,start]);
- function select(next:Scale|"",at:number){
-   dialog.current?.close();
-   focusAfterChange.current=true;
-   choose(next,at);
+   if(!url)return;
+   const abort=new AbortController();
+   fetch(url,{signal:abort.signal,cache:"no-store"}).then(async r=>{if(!r.ok)throw Error();return r.json()}).then(v=>{
+    if(!abort.signal.aborted)set({url,items:v.items,next:v.next,error:false});
+   }).catch(()=>{if(!abort.signal.aborted)set({url,items:[],next:0,error:true})});
+   return ()=>abort.abort();
+ },[url,attempt]);
+ return {...data,items:data.url===url?data.items:[],ready:data.url===url,failed:data.url===url&&data.error,retry:()=>retry(n=>n+1)};
+}
+type Props={api:string;level:Level|"";at:number;choose:(l:Level,at:number,replace?:boolean)=>void;children:ReactNode;revision:number};
+export function ThreadTime({api,level,at,choose,children,revision}:Props){
+ const base=api+"&refresh="+revision;
+ const [pages,setPages]=useState<number[]>([0]);
+ const cursor=pages[pages.length-1];
+ const months=useGroups(base+"&outline=months&at="+cursor);
+ const depth=levels.indexOf(level||"all");
+ const month=monthStart(at),week=weekStart(at),day=dayStart(at),band=bandStart(at);
+ const days=useGroups(depth>=1?base+"&outline=days&at="+month:"");
+ const hourRows=useGroups(depth>=3?base+"&outline=hours&at="+day:"");
+ const action=useRef(choose);action.current=choose;
+ useEffect(()=>{
+   if(!level && months.ready && months.items.length)action.current("hour",Math.floor(months.items[0].latest/HOUR)*HOUR,true);
+ },[level,months.ready,months.items]);
+ const chosen=[0,month,week,day,band,at];
+ const weeks=group(days.items,weekStart);
+ const bands=group(hourRows.items,bandStart);
+ const monthEnd=new Date(month);monthEnd.setUTCMonth(monthEnd.getUTCMonth()+1);
+ function status(data:ReturnType<typeof useGroups>){return data.failed?<button onClick={data.retry}>Retry loading periods</button>:!data.ready?<p role="status">Loading periods…</p>:null}
+ function branch(item:Item,n:number,label:string,nested:()=>ReactNode){
+   const open=depth>=n && item.start===chosen[n];
+   const age=Math.floor((dayStart(Date.now())-dayStart(item.start))/DAY);
+   const note=n===3?(age===0?"Today":age===1?"Yesterday":age+" days ago"):n===4?hours(item.start)+" – "+(new Date(item.start).getUTCHours()===18?"24:00":hours(item.start+6*HOUR)):"";
+   return <li key={item.start}>
+    <button className="time-branch" data-level={levels[n]} data-start={item.start} aria-expanded={open} onClick={()=>open?choose(levels[n-1],chosen[n-1]):choose(levels[n],item.start)}>
+      {open?<ChevronDown size={18}/>:<ChevronRight size={18}/>}<strong>{label}{note && <small>{note}</small>}</strong>
+      <span aria-label={item.count+" messages"}>{item.count.toLocaleString()}</span></button>
+    {open && nested()}</li>;
  }
- function goWider(){if(scale==="hour")select("day",dayStart(focus));else if(scale==="day")select("month",dayStart(focus)-29*DAY);else select("",0)}
- const total=counts.reduce((sum,n)=>sum+n,0);
- const ready=counts.length===(scale==="month"?30:scale==="day"?24:12);
- const month=scale==="month";
- const recent=()=>select("hour",Date.now()-HOUR);
- const overview=()=>select("month",dayStart(now)-29*DAY);
- const label=valid?(month?date.format(start)+" – "+date.format(end-1):scale==="day"?weekday.format(start)+", "+date.format(start):time.format(start)+" – "+time.format(end)):"All messages";
- const relative=(v:number)=>{const n=(dayStart(now)-dayStart(v))/DAY;return n===0?"Today":n===1?"Yesterday":n+" days ago"};
- return <section className="period-browser" aria-label="Conversation timeline">
-   {!valid?<div className="period-shortcuts"><button onClick={recent}><Clock size={16}/>Last hour</button><button onClick={overview}><CalendarDays size={16}/>Browse dates</button></div>:<>
-    <div className="period-path"><button onClick={goWider}><ArrowUpLeft size={15}/>{month?"All time":scale==="day"?"30 days":"Day"}</button>
-      <span>{scale==="hour"?date.format(start)+(dayStart(start)!==dayStart(end)?" – "+date.format(end):""):"UTC"}</span></div>
-    <div className="period-head"><div><h2 tabIndex={-1} ref={heading}>{label}{scale==="hour" && <small> UTC</small>}</h2>
-      <p>{scale==="day"?relative(start)+" · ":""}{ready?messages(total):"Loading…"}</p></div>
-      <div className="period-arrows"><button aria-label="Previous time period" disabled={start<span} onClick={()=>select(scale,start-span)}><ChevronLeft size={20}/></button>
-      <button aria-label="Next time period" disabled={end>=now} onClick={()=>select(scale,end)}><ChevronRight size={20}/></button></div>
-    </div>
-    {scale!=="hour" && <button ref={trigger} className="period-open" disabled={!ready} aria-haspopup="dialog" onClick={()=>{setBand(null);dialog.current?.showModal()}}>
-      {month?<CalendarDays size={17}/>:<Clock size={17}/>} {month?"Choose a day":"Choose an hour"} <ChevronDown size={17}/></button>}
-    <dialog ref={dialog} className="period-sheet" aria-labelledby="period-picker-title" onCancel={()=>trigger.current?.focus()} onClick={e=>{if(e.target===dialog.current){const r=e.currentTarget.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)e.currentTarget.close()}}}>
-      <header><div><p>{month?label:date.format(start)} · UTC</p><h2 id="period-picker-title">{month?"Choose a day":"Choose an hour"}</h2></div>
-      <button aria-label="Close picker" autoFocus onClick={()=>dialog.current?.close()}><X size={20}/></button></header>
-      <div className="period-sheet-body">{month?<><label className="specific-date">Go to date<input type="date" aria-label="Go to date (UTC)" max={new Date(now).toISOString().slice(0,10)} onChange={e=>{const ms=e.currentTarget.valueAsNumber;if(Number.isFinite(ms))select("day",ms)}}/></label>
-       {Array.from({length:counts.length},(_,j)=>counts.length-1-j).map(i=>{const at=start+i*DAY;return <button className="period-row" key={at} onClick={()=>select("day",at)}>
-        <span><strong>{weekday.format(at)}, {date.format(at)}</strong><small>{relative(at)}</small></span><span>{messages(counts[i])}</span><ChevronRight size={17}/></button>})}</>:
-       bands.map((name,i)=><div key={name}><button aria-expanded={band===i} className="period-row band-row" onClick={()=>setBand(band===i?null:i)}>
-         <span><strong>{name}</strong><small>{time.format(start+i*6*HOUR)} – {i===3?"24:00":time.format(start+(i+1)*6*HOUR)}</small></span>
-         <span>{messages(counts.slice(i*6,i*6+6).reduce((sum,n)=>sum+n,0))}</span><ChevronDown size={17}/></button>
-         {band===i && <div className="hour-options">{counts.slice(i*6,i*6+6).map((n,j)=>{const at=start+(i*6+j)*HOUR;return <button className="period-row" key={at} onClick={()=>select("hour",at)}>
-           <strong>{time.format(at)} UTC</strong><span>{messages(n)}</span><ChevronRight size={17}/></button>})}</div>}</div>)}</div>
-    </dialog>
-   </>}
- </section>
+ // A deep link may point beyond the current page of months.
+ const visible=[...months.items];
+ if(depth>=1 && months.ready && days.ready && days.items.length && !visible.some(v=>v.start===month))
+  visible.push({start:month,count:days.items.reduce((n,d)=>n+d.count,0),latest:at});
+ return <section className="time-outline" aria-label="Conversation timeline"><div className="outline-caption">Timeline · UTC <span>Messages</span></div>
+ {status(months)}{months.ready && !months.failed && !visible.length && <p>No activity in this period.</p>}
+ <ul>{visible.map(m=>branch(m,1,utc(m.start,{month:"long",year:"numeric"}),()=> <>{status(days)}<ul>
+ {weeks.map(w=>branch(w,2,formatDay(w.start)+" – "+formatDay(Math.min(monthEnd.getTime()-DAY,w.start+(6-(new Date(w.start).getUTCDay()+6)%7)*DAY)),()=> <ul>
+ {days.items.filter(d=>weekStart(d.start)===week).map(d=>branch(d,3,utc(d.start,{weekday:"short",day:"numeric",month:"short"}),()=><>{status(hourRows)}<ul>
+ {bands.map(b=>branch(b,4,["Overnight","Morning","Afternoon","Evening"][new Date(b.start).getUTCHours()/6],()=> <ul>
+ {hourRows.items.filter(h=>bandStart(h.start)===band).map(h=>branch(h,5,hours(h.start)+" UTC",()=> <div className="outline-messages">{children}</div>))}
+ </ul>))}</ul></>))}
+ </ul>))}</ul></>))}</ul>
+ {months.ready && (pages.length>1||months.next>0) && <div className="outline-pages">
+ {pages.length>1 && <button onClick={()=>{choose("all",0);setPages(p=>p.slice(0,-1))}}>Newer months</button>}
+ {months.next>0 && <button onClick={()=>{choose("all",0);setPages(p=>[...p,months.next])}}>Earlier months</button>}</div>}
+ </section>;
 }

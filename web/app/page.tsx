@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import {BodyText, mailTitle, Avatar, Receipt, MailTime, MailList, useMailClock, type Envelope} from "./mail-ui";
 import {splitMail} from "./mail-text";
-import {ThreadTime,type Scale} from "./thread-time";
+import {ThreadTime,type Level} from "./thread-time";
 import {MailTools} from "./mail-tools";
 import {SettingsPage} from "./settings";
 import {Mator} from "./brand-art";
@@ -137,10 +137,14 @@ export default function Home() {
   useEffect(()=>{try{setCompact(localStorage.getItem("inbox-density")!=="comfortable")}catch{}},[]);
   function toggleDensity(){setCompact(!compact);try{localStorage.setItem("inbox-density",compact?"comfortable":"compact")}catch{}}
   const number=params.get("number")??"";
-  const zoom=(params.get("zoom")??"") as Scale|"";
+  const requestedLevel=params.get("period")??"";
+  const level=(["all","month","week","day","band","hour"].includes(requestedLevel) && Number(params.get("start"))>=0 && Number(params.get("start"))<253402214400000?requestedLevel:"") as Level|"";
+  const zoom=level==="hour"?"hour":params.get("zoom")??"";
   const start=params.get("start")??"";
-  const [buckets,setBuckets]=useState<number[]>([]);
-  function chooseTime(scale:Scale|"",time:number){ navigate(pathname+(scale?"?zoom="+scale+"&start="+time:"")); }
+  const [revision,setRevision]=useState(0);
+  function chooseTime(period:Level,time:number,replace=false){
+    navigate(pathname+"?period="+period+(period==="all"?"":"&start="+time),replace)
+  }
   const after=params.get("after")??"", anchor=params.get("atSeq")??"";
   const [threadInfo,setThreadInfo]=useState({newer:"",title:"",received:0,sent:0});
   function browse(query:string,pending:boolean,page="",direction="before"){
@@ -148,13 +152,14 @@ export default function Home() {
     if(query)params.set("q",query);
     if(pending)params.set("view","requests");
     if(page)params.set(direction,page);
-    if(zoom && !query && page && (direction==="before"||direction==="after")){params.set("zoom",zoom);params.set("start",start)}
+    if(zoom && !query && page && (direction==="before"||direction==="after")){if(level)params.set("period",level);else params.set("zoom",zoom);params.set("start",start)}
     navigate(pathname+(params.size?"?"+params:""));
   }
   const parts = pathname.split("/");
   const box = parts[1] === "inboxes" ? parts[2] : acc?.operator ?? "operator";
   const threadId=parts[3]==="threads"?parts[4]:"";
  const folder = parts[1]==="settings"?"settings":parts[1]==="mail-setup"?"mail-setup":parts[1] === "activity" ? "activity" : parts[1] === "compose" ? "compose" : parts[1] === "agents" ? "agents" : parts[3] === "sent" ? "sent" : "inbox";
+  const isOutline=!!threadId&&!term&&!anchor&&!number&&!params.has("zoom")&&(!!level||(!before&&!after));
   const messageId = parts[1] === "messages" ? parts[2] : "";
   const     [rows, list] = useState<Row[]>([]),
     [cursor, next] = useState<string | null>(null);
@@ -218,9 +223,10 @@ export default function Home() {
       folder,
       q:term,view:requests?"requests":"",before,after,atSeq:anchor,number,zoom,start,
     });
+    if(isOutline && level!=="hour")q.set("outline","summary");
     const data = await api("desk/threads"+(threadId?"/"+threadId:"")+"?" + q);
     if (gen === generation.current) {
-      list(data.rows);setBuckets(data.buckets??[]);
+      list(data.rows??[]);
       if(number && data.anchor){
         const permanent=pathname+"?atSeq="+encodeURIComponent(data.anchor);
         history.replaceState(history.state,"",permanent);setPath(permanent);
@@ -231,7 +237,7 @@ export default function Home() {
   }
   useEffect(() => {
     if (!messageId && s?.name && acc && (folder === "inbox" || folder === "sent")) {
-      list([]);setBuckets([]);
+      list([]);
       next(null);
       void task(() => load());
     }
@@ -415,6 +421,28 @@ export default function Home() {
   const previousPath = typeof window==="undefined" ? "" : String(history.state?.from??"");
   const fromBox = /^\/inboxes\/([^/?]+)/.exec(previousPath)?.[1];
   const readerBox = fromBox || (selected?.row.dst.includes("@") || selected?.row.src===acc.operator ? selected?.row.src : selected?.row.dst) || acc.operator;
+  function mailRows(){return <>
+                {threadId && (cursor||threadInfo.newer) && <nav className="thread-nav" aria-label="Messages in this window">
+                  <span>{term?"Search results":zoom?"Newest first":"All messages"}</span>
+                  <span className="thread-steps"><button disabled={!cursor||busy} onClick={()=>browse(term,false,cursor!)}>← Older</button>
+                  <button disabled={!threadInfo.newer||busy} onClick={()=>browse(term,false,threadInfo.newer,"after")}>Newer →</button></span>
+                </nav>}
+                {!zoom && (threadId||term||requests||before) && <div className="results-line" role="status">{term?"Matches for “"+term+"”":requests?"Open requests":threadId?"Newest first":"Older conversations"} · {rows.length} on this page</div>}
+                <div className={!threadId&&compact?"compact-list":""}>
+                <MailList key={path} rows={rows} box={box} sent={folder==="sent"} timeline={!!threadId} query={term} anchor={anchor} now={now} follow={follow}/></div>
+
+                {!rows.length && (
+                  <div className="empty">
+                    <Mator pose="searching"/>
+                    <h2>{busy ? "Loading messages…" : term ? "No matching messages" : requests ? "No requests awaiting a reply" : zoom ? "No messages in this period" : "No messages yet"}</h2>
+                    {!busy && !term && !requests && !agentNames.length && (
+                      <button onClick={() => go("agents")}>
+                        Add your first agent
+                      </button>
+                    )}
+                  </div>
+                )}
+  </>}
   return (
     <main className="shell">
       <aside className={menu?"expanded":""}>
@@ -729,31 +757,11 @@ export default function Home() {
             <>
               <div className="mail-heading">
                 <div><h1>{threadId?(splitMail(threadInfo.title).subject||splitMail(threadInfo.title).lead||"Conversation"):folder==="sent"?"Sent":"Inbox"}</h1><p>{threadId?"Conversation · ":""}{box}{threadId && threadInfo.received+threadInfo.sent>0 && <> · {threadInfo.received.toLocaleString()} received · {threadInfo.sent.toLocaleString()} sent</>}</p></div>
-                <button aria-label="Refresh messages" disabled={busy} onClick={()=>void task(()=>load())}><RefreshCw size={16}/></button>
+                <button aria-label="Refresh messages" disabled={busy} onClick={()=>{setRevision(n=>n+1);void task(()=>load())}}><RefreshCw size={16}/></button>
               </div>
               <div className="mail-panel">
                 <MailTools thread={!!threadId} query={term} requests={requests} sent={folder==="sent"} compact={compact} toggle={toggleDensity} apply={browse}/>
-                {threadId && <ThreadTime scale={zoom} start={Number(start)} counts={buckets} choose={chooseTime}/>}
-                {threadId && (cursor||threadInfo.newer) && <nav className="thread-nav" aria-label="Messages in this window">
-                  <span>{term?"Search results":zoom?"Newest first":"All messages"}</span>
-                  <span className="thread-steps"><button disabled={!cursor||busy} onClick={()=>browse(term,false,cursor!)}>← Older</button>
-                  <button disabled={!threadInfo.newer||busy} onClick={()=>browse(term,false,threadInfo.newer,"after")}>Newer →</button></span>
-                </nav>}
-                {!zoom && (threadId||term||requests||before) && <div className="results-line" role="status">{term?"Matches for “"+term+"”":requests?"Open requests":threadId?"Newest first":"Older conversations"} · {rows.length} on this page</div>}
-                <div className={!threadId&&compact?"compact-list":""}>
-                <MailList key={path} rows={rows} box={box} sent={folder==="sent"} timeline={!!threadId} query={term} anchor={anchor} now={now} follow={follow}/></div>
-
-                {!rows.length && (
-                  <div className="empty">
-                    <Mator pose="searching"/>
-                    <h2>{busy ? "Loading messages…" : term ? "No matching messages" : requests ? "No requests awaiting a reply" : zoom ? "No messages in this period" : "No messages yet"}</h2>
-                    {!busy && !term && !requests && !agentNames.length && (
-                      <button onClick={() => go("agents")}>
-                        Add your first agent
-                      </button>
-                    )}
-                  </div>
-                )}
+                {isOutline?<ThreadTime key={box+"/"+threadId} api={"/api/desk/threads/"+threadId+"?box="+encodeURIComponent(box)} level={level} at={level?Number(start):0} choose={chooseTime} revision={revision}>{mailRows()}</ThreadTime>:<>{threadId && <button onClick={()=>chooseTime("all",0)}>Conversation timeline</button>}{mailRows()}</>}
                 {!threadId && before && <button onClick={()=>browse(term,requests)}>Back to newest</button>}
                 {!threadId && cursor && (
                   <button

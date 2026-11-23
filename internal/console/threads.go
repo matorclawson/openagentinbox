@@ -142,6 +142,9 @@ func (s *server) threads(_ http.ResponseWriter, r *http.Request) (any, error) {
 	if folder != "inbox" && folder != "sent" {
 		return nil, failure{400, "Unknown folder"}
 	}
+	if q.Get("outline") != "" {
+		return s.threadOutline(r, box, r.PathValue("root"))
+	}
 	if q.Get("zoom") != "" {
 		return s.threadTime(r, box, r.PathValue("root"))
 	}
