@@ -23,6 +23,10 @@ func (n *Node) PublishBatch(ctx context.Context, items []Publication) ([]Record,
 	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
+	return n.publishBatchLocked(ctx, items)
+}
+
+func (n *Node) publishBatchLocked(ctx context.Context, items []Publication) ([]Record, error) {
 	if n.closed {
 		return nil, ErrClosed
 	}

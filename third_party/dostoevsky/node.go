@@ -135,12 +135,13 @@ func (s *stream) signal() {
 }
 
 type Node struct {
-	mu       sync.RWMutex
-	j        *journal
-	cfg      Config
-	topology string
-	streams  map[Partition]*stream
-	closed   bool
+	publishes publishQueue
+	mu        sync.RWMutex
+	j         *journal
+	cfg       Config
+	topology  string
+	streams   map[Partition]*stream
+	closed    bool
 }
 
 func (c Config) validate() error {
@@ -338,8 +339,11 @@ func (n *Node) Publish(ctx context.Context, t string, m Message) (Record, error)
 	if !validText(m.ID, m.Key) {
 		return Record{}, ErrInvalid
 	}
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	return n.schedulePublish(ctx, p, m)
+}
+
+// publishLocked writes one record under the node lock.
+func (n *Node) publishLocked(ctx context.Context, p Partition, m Message) (Record, error) {
 	if e := ctx.Err(); e != nil {
 		return Record{}, e
 	}
