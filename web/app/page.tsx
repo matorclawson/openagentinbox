@@ -16,7 +16,7 @@ import {
   Plus,
 } from "lucide-react";
 import {BodyText, mailTitle, Avatar, Receipt, MailTime, MailList, useMailClock, type Envelope} from "./mail-ui";
-import {Orbit} from "./orbit";
+import {MailArt,Mator} from "./brand-art";
 import {MailSetup} from "./mail-setup";
 import { Workspace, EnrollmentQueue, useWorkspace } from "./live";
 type Session = {
@@ -50,7 +50,7 @@ async function api(path: string, body?: object) {
 function Brand() {
   return (
     <div className="brand">
-      <Orbit size={32}/>
+      <img className="brand-icon" src="/brand/icon.png" alt="" width="32" height="32"/>
       <span>Open</span>AgentInbox
     </div>
   );
@@ -308,7 +308,7 @@ export default function Home() {
       <main className="gate">
         <Brand />
         <section className="card auth">
-          <Mail className="icon" />
+          <MailArt pose="greeting"/>
           <h1>{s.setup ? "Set up your inbox" : "Welcome back"}</h1>
           <p>
             {s.setup
@@ -462,7 +462,7 @@ export default function Home() {
                 Back
               </button>
               <article className="card detail reader">
-                <div className="reader-kicker"><Orbit size={23}/>Correspondence</div>
+                <div className="reader-kicker"><Mator pose="reading" className="reader-mator"/>Correspondence</div>
                 <h1>{mailTitle(selected.row,selected.body)}</h1>
                 <div className="byline"><Avatar name={selected.row.src}/><div><b>{selected.row.src.replace(/^external:/,"")}</b><small>To {selected.row.dst}</small>{selected.row.audience && <details><summary>All {selected.row.audience.length} recipients</summary><ul>{selected.row.audience.map(name=><li key={name}>{name}</li>)}</ul></details>}</div><MailTime value={selected.row.at} now={now} label="Sent"/></div>
                 {selected.row.trust==="external" && <p>Internet email · Sender supplied by the email header.</p>}
@@ -507,7 +507,7 @@ export default function Home() {
             <Workspace data={live} connection={connection} review={()=>go("agents")} openBox={name=>go("inbox",name)}/>
           ) : folder === "compose" ? (
             <>
-              <h1>New message</h1>
+              <div className="section-title"><Mator pose="working"/><h1>New message</h1></div>
               <form
                 className="card detail"
                 onSubmit={(e) => {
@@ -572,7 +572,7 @@ export default function Home() {
             </>
           ) : folder === "agents" ? (
             <>
-              <h1>Agents</h1>
+              <div className="section-title"><Mator pose="greeting"/><h1>Agents</h1></div>
               {acc.email_domain&&<p>Internet email addresses use <code>inbox-name@{acc.email_domain}</code>.</p>}
               <AddressEditor/>
               <RevokeList/>
@@ -700,7 +700,7 @@ export default function Home() {
           ) : (
             <>
               <div className="mail-heading">
-                <img className="orbit-illustration" src="/mail-orbit.svg" alt="" width="320" height="166"/>
+                <MailArt pose={threadId?"chatting":folder==="sent"?"rocket":"reading"}/>
                 <div><h1>{threadId?(rows[0]?mailTitle(rows[0]):"Conversation"):folder==="sent"?"Sent":"Inbox"}</h1><p>{threadId?"Conversation · ":""}{box}</p></div>
                 <button aria-label="Refresh messages" disabled={busy} onClick={()=>void task(()=>load())}><RefreshCw size={16}/></button>
               </div>
@@ -713,7 +713,7 @@ export default function Home() {
                 <MailList key={path} rows={rows} box={box} sent={folder==="sent"} timeline={!!threadId} now={now} follow={follow}/>
                 {!rows.length && (
                   <div className="empty">
-                    <Inbox />
+                    <Mator pose="searching"/>
                     <h2>{busy ? "Loading messages…" : "No messages yet"}</h2>
                     {!busy && !agentNames.length && (
                       <button onClick={() => go("agents")}>

@@ -1,6 +1,7 @@
 @import "tailwindcss";
+@import "../brand/theme.css";
 @font-face {
-  font-family: Space;
+  font-family: "Space Grotesk";
   src: url("/fonts/space-grotesk-latin.woff2");
 }
 * {
@@ -60,7 +61,7 @@ textarea:focus-visible {
 h1,
 h2,
 strong {
-  font-family: Space, system-ui, sans-serif;
+  font-family: "Space Grotesk", system-ui, sans-serif;
 }
 .brand {
   display: flex;
@@ -418,8 +419,8 @@ aside .brand span{color:#ffa477}
 .shell :is(button,a,summary):focus-visible{outline:3px solid #ab491e;outline-offset:2px}
 .mail-heading{position:relative;isolation:isolate;min-height:162px;display:flex;align-items:center;padding:22px clamp(22px,3vw,40px);overflow:hidden;border-block:2px solid #3f5243;background:#f1e6c9;color:#293c31}
 .orbit-illustration{position:absolute;right:6%;top:50%;transform:translateY(-50%);width:31%;height:100%;pointer-events:none;z-index:-1}
-.mail-heading>div{width:60%}.mail-heading h1{font:650 clamp(32px,4vw,60px)/1.05 Space,system-ui;letter-spacing:-.065em;margin:0}
-.mail-heading p{color:#52634e;margin:9px 0 0;font:500 .94rem Space,system-ui;overflow-wrap:anywhere}
+.mail-heading>div{width:60%}.mail-heading h1{font:650 clamp(32px,4vw,60px)/1.05 "Space Grotesk",system-ui;letter-spacing:-.065em;margin:0}
+.mail-heading p{color:#52634e;margin:9px 0 0;font:500 .94rem "Space Grotesk",system-ui;overflow-wrap:anywhere}
 .mail-heading>button{position:absolute;right:12px;bottom:12px;min-width:36px;padding:7px;color:#375343;background:#faf1da;border-color:#abac93}
 .mail-panel,.reader{background:white;border:1px solid var(--line);border-radius:15px;box-shadow:0 5px 18px #41391f09;margin-top:20px}
 .mail-tabs{display:flex;gap:6px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line)}
@@ -429,7 +430,7 @@ aside .brand span{color:#ffa477}
 .post-row{position:relative;display:grid;grid-template-columns:36px minmax(0,1fr) auto;gap:14px;align-items:center;padding:14px 20px;border-bottom:1px solid #e4dcc9;color:var(--ink)}
 .post-row:hover{background:#f4eddc;box-shadow:inset 3px 0 #cb5929}
 .post-row:last-child{border-radius:0 0 15px 15px;border-bottom:0}
-.person{width:36px;height:36px;border-radius:12px;display:inline-grid;place-items:center;font:650 12px Space,system-ui;letter-spacing:.03em;flex:none}
+.person{width:36px;height:36px;border-radius:12px;display:inline-grid;place-items:center;font:650 12px "Space Grotesk",system-ui;letter-spacing:.03em;flex:none}
 .tint0{color:#235650;background:#d4e3d5}.tint1{color:#3c6156;background:#e2e8d1}.tint2{color:#794022;background:#f7ddc0}.tint3{color:#475746;background:#e3e7da}.tint4{color:#773a27;background:#f3d7c5}
 .post-main,.post-meta{display:grid;align-content:center;gap:4px}
 .post-main strong{font-size:1rem;line-height:1.35;letter-spacing:-.018em;overflow-wrap:anywhere}
@@ -488,7 +489,7 @@ aside .brand span{color:#ffa477}
 
 @font-face{font-family:"Source Serif 4";src:url("/fonts/source-serif-4-latin.woff2") format("woff2");font-weight:200 900;font-display:swap}
 @font-face{font-family:"JetBrains Mono";src:url("/fonts/jetbrains-mono-latin.woff2") format("woff2");font-weight:100 800;font-display:swap}
-:root{--paper:#fff8e8;--cream:#f7efdc;--teal:#205c52;--orange:#b3461b;--charcoal:#332f27;--brass:#8b702e;--atomic-yellow:#f4c740;--display:Space,system-ui,sans-serif;--prose:"Source Serif 4",Georgia,serif;--code:"JetBrains Mono",ui-monospace,monospace}
+:root{--paper:var(--color-warm-white);--cream:var(--color-background);--teal:var(--color-secondary);--orange:var(--color-primary);--charcoal:var(--color-foreground);--brass:var(--color-accent);--display:var(--font-display);--prose:var(--font-serif);--code:var(--font-mono)}
 body{background:var(--cream);color:var(--charcoal)}
 body :is(code,kbd,samp),.envelope-fields pre,.reader .reference code{font-family:var(--code)}
 .brand svg{color:var(--orange);flex:none}aside .brand svg{color:#ffa271;width:30px}
@@ -515,3 +516,53 @@ body :is(code,kbd,samp),.envelope-fields pre,.reader .reference code{font-family
 
 .issued-credential{border-inline-start:3px solid var(--brass);padding:10px 14px;background:#f4e9cc;color:var(--charcoal)}
 .issued-credential input{font-family:var(--code)}
+
+/* The shared brand tokens also theme the legacy desk controls. */
+.shell{--ink:var(--color-foreground);--muted:var(--color-muted-foreground);--line:var(--color-border);--accent:var(--color-navy);background:var(--color-background)}
+.brand-icon{object-fit:contain;flex:none;margin-right:6px}
+.brand span,.shell aside .brand span{color:var(--color-foreground)}.brand{color:var(--color-navy)}
+.shell aside{color:var(--color-foreground);background:var(--color-card);border-right:1px solid var(--line)}
+.shell .workspace{border-color:var(--line);background:var(--color-warm-white);border-radius:var(--radius-lg)}
+.shell .workspace small,.shell .directory input::placeholder{color:var(--muted)}
+.shell .primary,.gate .primary,.shell aside>.primary{background:var(--color-primary);color:var(--color-foreground);box-shadow:var(--shadow-soft);border:0;font-weight:650}
+.shell .primary:hover,.gate .primary:hover{box-shadow:var(--shadow-card);background:color-mix(in srgb,var(--color-primary) 86%,var(--color-warm-white))}
+.shell nav button,.shell footer button,.shell .directory-list a,.shell .directory input{color:var(--color-foreground)}
+.shell nav button:hover,.shell footer button:hover,.shell .directory-list a:hover{background:var(--color-muted);color:var(--ink)}
+.shell nav button[aria-current],.shell .directory-list a[aria-current]{background:color-mix(in srgb,var(--color-secondary) 15%,var(--color-background));color:var(--color-navy);box-shadow:inset 3px 0 var(--color-secondary)}
+.shell .directory{border-color:var(--line)}.shell .directory input{background:var(--color-warm-white);border-color:var(--line)}
+.shell .desk>header{background:var(--color-background);border-color:var(--line)}
+.shell :is(button,a,summary):focus-visible,.gate :focus-visible{outline-color:var(--color-ring)}
+.shell :is(.card,.agentrow,.overview,.mail-panel),.gate .card{background:var(--color-card);border:1px solid var(--color-border);border-radius:var(--radius-lg);box-shadow:var(--shadow-card)}
+.shell .reader,.shell .mail-panel,.shell .desk button.post-row,.shell .thread-body{background:var(--color-warm-white)}
+.shell .desk button,.mobile-menu,.shell>aside>.primary,.gate button{border-radius:var(--radius-md)}
+.mail-heading,.gate .auth{position:relative;isolation:isolate;overflow:hidden;background:var(--background-image-hero);border:1px solid var(--color-border);border-radius:var(--radius-2xl);box-shadow:var(--shadow-card);color:var(--color-foreground)}
+.mail-heading{min-height:172px;padding:24px clamp(20px,4vw,46px)}
+.mail-heading::before,.gate .auth::before{content:"";position:absolute;inset:0;pointer-events:none;z-index:-1;background-image:linear-gradient(to right,color-mix(in srgb,var(--color-foreground) 4%,transparent) 1px,transparent 1px),linear-gradient(to bottom,color-mix(in srgb,var(--color-foreground) 4%,transparent) 1px,transparent 1px);background-size:40px 40px}
+.mail-heading h1{color:var(--color-navy)}.mail-heading p{color:var(--muted)}
+.mator{object-fit:contain;display:block;flex:none;pointer-events:none}
+.mail-heading>.mail-art,.gate .mail-art{position:absolute;right:6%;width:32%;max-width:265px;height:100%;top:0;pointer-events:none}
+.mail-art .retro-shapes{position:absolute;width:100%;height:100%;inset:0}
+.mail-art .mator{position:absolute;width:75%;height:90%;left:14%;bottom:3%;filter:drop-shadow(0 4px 3px color-mix(in srgb,var(--color-foreground) 14%,transparent))}
+.mail-heading>button,.mobile-menu{background:var(--color-background);border:1px solid var(--color-border);color:var(--color-navy)}
+.mail-heading>button{right:16px;bottom:14px}
+.gate .auth{padding-top:75px}.gate .mail-art{width:86px;height:80px;left:22px;top:0}.gate .auth form{position:relative}
+.mail-tabs [aria-current],.mail-tabs span,.reader-actions a{background:color-mix(in srgb,var(--color-secondary) 13%,var(--color-background));color:var(--color-navy)}
+.post-day{background:var(--color-card);color:var(--muted)}
+.post-row,.desk button.post-row{border-color:var(--line)}
+.post-row:hover,.desk button.post-row[aria-expanded=true]{background:var(--color-card);box-shadow:inset 3px 0 var(--color-primary)}
+.shell .reader{border-top:3px solid var(--color-secondary)}.reader-kicker{color:var(--color-navy)}.reader-mator{height:42px;width:42px}
+.section-title{display:flex;align-items:center;gap:15px;margin-bottom:20px}.section-title .mator{width:62px;height:62px}.section-title h1{margin:0;color:var(--color-navy)}
+.empty .mator{width:84px;height:84px}.shell .mail-tabs a{border-radius:var(--radius-sm)}.mail-tabs [aria-current]{box-shadow:inset 0 -2px var(--color-secondary)}
+.mail-status{background:var(--color-muted);color:var(--muted)}
+.status-opened,.status-replied{background:color-mix(in srgb,var(--color-secondary) 17%,var(--color-background));color:var(--color-navy)}
+.urgent-mail{background:var(--color-primary);color:var(--ink)}
+.reader .reference,.reader .letter-body{border-color:var(--line)}.issued-credential{border-color:var(--color-accent)}
+@media(max-width:740px){.mail-heading{min-height:124px;padding:16px}.mail-heading>.mail-art{right:8%;width:33%}.mail-heading>button{right:5px;bottom:6px}.mail-heading:has(+.mail-panel .timeline)>div:not(.mail-art){width:68%}.mail-heading:has(+.mail-panel .timeline)>.mail-art{width:26%;right:4%}.reader-mator{width:34px;height:34px}}
+/* Brand-derived tints preserve sender distinction across the directory. */
+.person{color:var(--color-foreground)}
+.tint0{background:color-mix(in srgb,var(--color-secondary) 23%,var(--paper))}
+.tint1{background:color-mix(in srgb,var(--color-navy) 15%,var(--paper))}
+.tint2{background:color-mix(in srgb,var(--color-primary) 22%,var(--paper))}
+.tint3{background:color-mix(in srgb,var(--color-sage) 25%,var(--paper))}
+.tint4{background:color-mix(in srgb,var(--color-terracotta) 19%,var(--paper))}
+.shell .directory input::placeholder,.shell aside footer button{color:var(--color-muted-foreground)}

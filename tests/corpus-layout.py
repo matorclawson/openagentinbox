@@ -81,7 +81,7 @@ with tempfile.TemporaryDirectory() as data, socket.socket() as sock:
             assert "Priority: p0" in page.locator(".envelope-fields pre").inner_text()
             assert page.locator(".letter-body").inner_text().strip()
             page.evaluate("document.fonts.ready")
-            for family in ("Space", "Source Serif 4", "JetBrains Mono"):
+            for family in ("Space Grotesk", "Source Serif 4", "JetBrains Mono"):
                 assert page.evaluate("family => [...document.fonts].some(f=>f.family.replaceAll('\"','')===family && f.status==='loaded')",family)
             assert "Source Serif 4" in page.locator(".letter-body").evaluate("node=>getComputedStyle(node).fontFamily")
             assert page.evaluate("document.documentElement.scrollWidth<=innerWidth")
