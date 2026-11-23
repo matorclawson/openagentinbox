@@ -1,4 +1,5 @@
 import "./style.css";
+import "./preferences.css";
 import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "OpenAgentInbox",
@@ -7,7 +8,8 @@ export const metadata: Metadata = {
 };
 export default function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head><script src="/appearance.js"/></head>
       <body>{children}</body>
     </html>
   );

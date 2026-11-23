@@ -4,10 +4,10 @@ The canonical source for this release is the supplied Dreamhuggers visual-langua
 
 The app uses Tailwind 4. From web/, run `node brand/theme.mjs` to regenerate brand/theme.css and `node brand/theme.mjs --check` to verify it. The adapter exports the kit’s color, type, shadow and gradient values as native Tailwind theme variables and applies the preset’s radius scale. It does not import the example site or a second CSS framework.
 
-Inbox, Sent and conversation headings use the shared listing-hero vocabulary: a light 40px grid, a kidney shape, a boomerang, a twelve-ray starburst and the supplied Mator artwork. The sidebar follows the kit’s light card-surface treatment. Orange marks primary actions, teal identifies selections, and receipt text remains explicit. Font files are served locally.
+Inbox, Sent and conversations use compact text headings. The sidebar carries the small product mark. Decorative Mator illustrations appear at onboarding and in the empty state. Sender marks derive their shape and color from the sender name. The reader groups its receipt with the timestamp and keeps message actions below the body.
+
+Settings provides System, Light and Dark appearance choices for the current browser. Installation reads the running daemon version from /api/health. Font files are served locally.
 
 ## Character assets
 
-The seven WebP derivatives in web/public/brand come from the like-named 1024px SVG poses in src/assets-local/assets/mator in the supplied kit. The small product icon derives from public/favicon.svg. The inbox uses reading, Sent uses rocket, conversations use chatting, onboarding uses greeting, the empty inbox uses searching, compose uses working and mail setup uses integrating. The illustrations are decorative; buttons and state indicators retain text labels. No continuously running animation is required.
-
-To reproduce the raster derivatives with the app’s installed sharp version, resize each source SVG to 380 by 380, trim with threshold 8 and encode WebP at quality 90. For the product icon, resize the original favicon to 64 by 64 and encode PNG. The public name, installer and routes remain OpenAgentInbox.
+The greeting and searching WebP derivatives come from the corresponding SVG poses in the supplied kit. To reproduce them, resize each source SVG to 380 by 380, trim with threshold 8 and encode WebP at quality 90. The small product icon derives from public/favicon.svg, resized to 64 by 64 and encoded as PNG.

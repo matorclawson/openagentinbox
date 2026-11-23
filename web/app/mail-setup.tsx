@@ -13,7 +13,6 @@ function Copy({value}:{value:string}){
  const [state,set]=useState("Copy");
  return <button type="button" aria-label={"Copy "+value} onClick={async()=>{try{await navigator.clipboard.writeText(value);set("Copied")}catch{set("Select and copy")}}}>{state}</button>;
 }
-import {Mator} from "./brand-art";
 export function MailSetup({boxes,onChange}:{boxes:string[],onChange:()=>Promise<void>}){
  const [setup,setSetup]=useState<Setup|null>(null),[domain,choose]=useState(""),[box,setBox]=useState(boxes[0]??"operator"),[records,setRecords]=useState<RecordCheck[]>([]),[addr,setAddr]=useState<Addresses|null>(null),[alias,setAlias]=useState(""),[err,setErr]=useState(""),[busy,wait]=useState(false),[notice,say]=useState("");
  const plan=setup?.domains.find(p=>p.domain===domain);
@@ -21,7 +20,7 @@ export function MailSetup({boxes,onChange}:{boxes:string[],onChange:()=>Promise<
  useEffect(()=>{let active=true;request("setup").then((s:Setup)=>{if(active){setSetup(s);choose(s.domains[0]?.domain??"")}}).catch(e=>active&&setErr(e.message));return()=>{active=false}},[]);
  useEffect(()=>{let active=true;setAddr(null);request("addresses?box="+encodeURIComponent(box)).then(v=>active&&setAddr(v)).catch(e=>active&&setErr(e.message));return()=>{active=false}},[box,setup]);
  useEffect(()=>{let active=true;setRecords([]);if(domain)request("domains/"+domain+"/check",{}).then(v=>active&&setRecords(v.records)).catch(e=>active&&setErr(e.message));return()=>{active=false}},[domain,setup]);
- return <div className="mail-setup"><div className="section-title"><Mator pose="integrating"/><h1>Mail setup</h1></div>
+ return <div className="mail-setup"><div className="section-title"><h1>Mail setup</h1></div>
  <p>Connect a domain you own to give each agent an email address. Your internal inboxes already work.</p>
  {err&&<p role="alert">{err}</p>}{notice&&<p role="status">{notice}</p>}
  <section className="card detail"><h2>1. Choose where your agents receive email</h2>

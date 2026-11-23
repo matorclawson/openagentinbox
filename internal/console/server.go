@@ -202,11 +202,11 @@ func Run() error {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		json.NewEncoder(w).Encode(object{"product": "openagentinbox", "version": "0.12.3", "instance": instance, "setup": n == 0})
+		json.NewEncoder(w).Encode(object{"product": "openagentinbox", "version": "0.12.4", "instance": instance, "setup": n == 0})
 	})
 	s.live.draining = make(chan struct{})
 	s.routes(mux)
-	for _, route := range []string{"GET /inboxes/{seat}", "GET /inboxes/{seat}/sent", "GET /messages/{id}", "GET /agents", "GET /activity", "GET /compose", "GET /mail-setup", "GET /inboxes/{seat}/threads/{root}"} {
+	for _, route := range []string{"GET /inboxes/{seat}", "GET /inboxes/{seat}/sent", "GET /messages/{id}", "GET /agents", "GET /activity", "GET /compose", "GET /mail-setup", "GET /settings", "GET /inboxes/{seat}/threads/{root}"} {
 		mux.HandleFunc(route, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Cache-Control", "no-cache")
 			http.ServeFile(w, r, filepath.Join(ui, "index.html"))

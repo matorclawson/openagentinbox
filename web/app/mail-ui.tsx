@@ -32,11 +32,19 @@ export function MailTime({value,now,label}:{value:string|number;now:number;label
   return <time dateTime={date.toISOString()} title={exact} aria-label={exact}>{text}</time>;
 }
 export function Avatar({name}:{name:string}) {
-  const text = name.replace(/^external:/,"");
-  const words = text.split(/[-.@_ ]+/).filter(Boolean);
-  const initials = words.length > 1 ? words[0][0]+words[1][0] : text.slice(0,2);
-  const tint = Array.from(text).reduce((sum,ch)=>(sum*31+ch.charCodeAt(0))>>>0,0)%5;
-  return <span aria-hidden="true" className={"person tint"+tint}>{initials.toUpperCase()}</span>;
+  // Symmetric 5×5 sender stamps. Geometry remains recognizable without colour.
+  const hash=Array.from(name.toLowerCase()).reduce((h,ch)=>Math.imul(h^ch.charCodeAt(0),16777619)>>>0,2166136261);
+  const colors=["#285854","#79422e","#34466c","#584472","#70465a","#3f593b","#3c586e","#74551f"];
+  const tiles:string[]=[];
+  for(let y=0;y<5;y++){
+    for(let x=0;x<5;x++){
+      if((hash >>> (3*y+Math.min(x,4-x)))&1) tiles.push(`M${4+x*4} ${4+y*4}h4v4h-4z`);
+    }
+  }
+  return <svg className="sender-stamp" viewBox="0 0 28 28" aria-hidden="true">
+    <rect width="28" height="28" rx={6} fill={colors[hash>>>29]}/>
+    <path d={tiles.join("") || "M8 12h12v4H8z"} fill="#fff4dc"/>
+  </svg>;
 }
 export function Receipt({row}:{row:Envelope}) {
   const external = row.dst.includes("@"), multiple = row.dst.includes(", ");

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useRef, type FormEvent } from "react";
 import {
-  Menu, Layers, ChevronRight, MessageSquare,
+  Settings, Settings2, Menu, Layers, ChevronRight, MessageSquare,
   Inbox,
   Activity,
   Send,
@@ -16,7 +16,8 @@ import {
   Plus,
 } from "lucide-react";
 import {BodyText, mailTitle, Avatar, Receipt, MailTime, MailList, useMailClock, type Envelope} from "./mail-ui";
-import {MailArt,Mator} from "./brand-art";
+import {SettingsPage} from "./settings";
+import {Mator} from "./brand-art";
 import {MailSetup} from "./mail-setup";
 import { Workspace, EnrollmentQueue, useWorkspace } from "./live";
 type Session = {
@@ -129,7 +130,7 @@ export default function Home() {
   const parts = path.split("/");
   const box = parts[1] === "inboxes" ? parts[2] : acc?.operator ?? "operator";
   const threadId=parts[3]==="threads"?parts[4]:"";
- const folder = parts[1]==="mail-setup"?"mail-setup":parts[1] === "activity" ? "activity" : parts[1] === "compose" ? "compose" : parts[1] === "agents" ? "agents" : parts[3] === "sent" ? "sent" : "inbox";
+ const folder = parts[1]==="settings"?"settings":parts[1]==="mail-setup"?"mail-setup":parts[1] === "activity" ? "activity" : parts[1] === "compose" ? "compose" : parts[1] === "agents" ? "agents" : parts[3] === "sent" ? "sent" : "inbox";
   const messageId = parts[1] === "messages" ? parts[2] : "";
   const     [rows, list] = useState<Row[]>([]),
     [cursor, next] = useState<string | null>(null);
@@ -253,7 +254,7 @@ export default function Home() {
     key(""); warn(""); say("");
   }
   function go(v: typeof folder, seat = box) {
-    navigate(v==="mail-setup" || v === "activity" || v === "compose" || v === "agents" ? "/" + v : "/inboxes/" + encodeURIComponent(seat) + (v === "sent" ? "/sent" : ""));
+    navigate(v==="settings" || v==="mail-setup" || v === "activity" || v === "compose" || v === "agents" ? "/" + v : "/inboxes/" + encodeURIComponent(seat) + (v === "sent" ? "/sent" : ""));
   }
   function follow(e: React.MouseEvent<HTMLAnchorElement>) {
     if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey && e.button === 0) {
@@ -308,7 +309,7 @@ export default function Home() {
       <main className="gate">
         <Brand />
         <section className="card auth">
-          <MailArt pose="greeting"/>
+          <Mator pose="greeting"/>
           <h1>{s.setup ? "Set up your inbox" : "Welcome back"}</h1>
           <p>
             {s.setup
@@ -399,7 +400,7 @@ export default function Home() {
           Compose
         </button>
         <nav>
-          {(["inbox", "sent", "agents", "activity","mail-setup"] as const).map(
+          {(["inbox", "sent", "agents", "activity","mail-setup","settings"] as const).map(
             (v) => (
               <button
                 key={v}
@@ -411,9 +412,9 @@ export default function Home() {
                 ) : v === "sent" ? (
                   <Send />
                 ) : (
-                  v === "activity" ? <Activity /> : <Users />
+                  v === "activity" ? <Activity /> : v==="settings"?<Settings/>:v==="mail-setup"?<Settings2/>:<Users />
                 )}
-                {v === "inbox" ? "Inbox" : v === "sent" ? "Sent" : v === "activity" ? "Activity" : v==="mail-setup"?"Mail setup":"Agents"}
+                {v === "inbox" ? "Inbox" : v === "sent" ? "Sent" : v === "activity" ? "Activity" : v==="mail-setup"?"Mail setup":v==="settings"?"Settings":"Agents"}
               </button>
             ),
           )}
@@ -462,9 +463,8 @@ export default function Home() {
                 Back
               </button>
               <article className="card detail reader">
-                <div className="reader-kicker"><Mator pose="reading" className="reader-mator"/>Correspondence</div>
                 <h1>{mailTitle(selected.row,selected.body)}</h1>
-                <div className="byline"><Avatar name={selected.row.src}/><div><b>{selected.row.src.replace(/^external:/,"")}</b><small>To {selected.row.dst}</small>{selected.row.audience && <details><summary>All {selected.row.audience.length} recipients</summary><ul>{selected.row.audience.map(name=><li key={name}>{name}</li>)}</ul></details>}</div><MailTime value={selected.row.at} now={now} label="Sent"/></div>
+                <div className="byline"><Avatar name={selected.row.src}/><div><b>{selected.row.src.replace(/^external:/,"")}</b><small>To {selected.row.dst}</small>{selected.row.audience && <details><summary>All {selected.row.audience.length} recipients</summary><ul>{selected.row.audience.map(name=><li key={name}>{name}</li>)}</ul></details>}</div><div className="message-meta"><MailTime value={selected.row.at} now={now} label="Sent"/><Receipt row={selected.row.audience?{...selected.row,dst:selected.row.audience.join(", ")}:selected.row}/></div></div>
                 {selected.row.trust==="external" && <p>Internet email · Sender supplied by the email header.</p>}
                 <BodyText body={selected.body} external={selected.row.trust==="external"}/>
                 <div className="reader-actions">                {selected.row.src !== acc.operator && (
@@ -477,7 +477,7 @@ export default function Home() {
                     Reply
                   </button>
                 )}
-<Receipt row={selected.row.audience?{...selected.row,dst:selected.row.audience.join(", ")}:selected.row}/>{selected.row.thread && <a onClick={follow} href={"/inboxes/"+encodeURIComponent(readerBox)+"/threads/"+encodeURIComponent(selected.row.thread)}><MessageSquare size={15}/>View conversation</a>}</div>
+{selected.row.thread && <a onClick={follow} href={"/inboxes/"+encodeURIComponent(readerBox)+"/threads/"+encodeURIComponent(selected.row.thread)}><MessageSquare size={15}/>View conversation</a>}</div>
                 {selected.row.original_available && <button onClick={()=>void task(async()=>{
                   const data=await api("desk/email-original/"+selected.row.id);
                   const blob=new Blob([Uint8Array.from(atob(data.base64),c=>c.charCodeAt(0))],{type:"application/octet-stream"});
@@ -503,11 +503,11 @@ export default function Home() {
                 </form></details>
               </article>
             </>
-          ) : folder==="mail-setup" ? <MailSetup boxes={[acc.operator,...agentNames]} onChange={async()=>accounts(await api("desk/accounts"))}/> : folder === "activity" ? (
+          ) : folder==="settings" ? <SettingsPage/> : folder==="mail-setup" ? <MailSetup boxes={[acc.operator,...agentNames]} onChange={async()=>accounts(await api("desk/accounts"))}/> : folder === "activity" ? (
             <Workspace data={live} connection={connection} review={()=>go("agents")} openBox={name=>go("inbox",name)}/>
           ) : folder === "compose" ? (
             <>
-              <div className="section-title"><Mator pose="working"/><h1>New message</h1></div>
+              <div className="section-title"><h1>New message</h1></div>
               <form
                 className="card detail"
                 onSubmit={(e) => {
@@ -572,7 +572,7 @@ export default function Home() {
             </>
           ) : folder === "agents" ? (
             <>
-              <div className="section-title"><Mator pose="greeting"/><h1>Agents</h1></div>
+              <div className="section-title"><h1>Agents</h1></div>
               {acc.email_domain&&<p>Internet email addresses use <code>inbox-name@{acc.email_domain}</code>.</p>}
               <AddressEditor/>
               <RevokeList/>
@@ -700,7 +700,6 @@ export default function Home() {
           ) : (
             <>
               <div className="mail-heading">
-                <MailArt pose={threadId?"chatting":folder==="sent"?"rocket":"reading"}/>
                 <div><h1>{threadId?(rows[0]?mailTitle(rows[0]):"Conversation"):folder==="sent"?"Sent":"Inbox"}</h1><p>{threadId?"Conversation · ":""}{box}</p></div>
                 <button aria-label="Refresh messages" disabled={busy} onClick={()=>void task(()=>load())}><RefreshCw size={16}/></button>
               </div>
