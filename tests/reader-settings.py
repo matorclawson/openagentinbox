@@ -127,5 +127,7 @@ with tempfile.TemporaryDirectory() as root:
             assert not res["rows"]
             print("PASS: individual request triage, resolved request removed, body and exact ID search, mailbox isolation, keyboard focus and paginated return.")
             print("PASS: 40 conversation heads, linked replies, singleton and direct routes, receipt states, relative and previous-day timestamps, inline body, desktop and mobile layout, directory navigation.")
+            from massive_thread import check_thread
+            check_thread(page,url,root,tokens)
             b.close()
     finally:proc.terminate();proc.wait(timeout=10)

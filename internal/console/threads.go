@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"net/http"
 	"net/mail"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -161,16 +162,55 @@ func (s *server) threads(_ http.ResponseWriter, r *http.Request) (any, error) {
 	query := "SELECT " + fields + `h.root,h.n,EXISTS(SELECT 1 FROM thread_heads other WHERE other.box=h.box AND other.root=h.root AND other.folder=CASE h.folder WHEN 'sent' THEN 'inbox' ELSE 'sent' END AND (other.latest<>h.latest OR other.n>1))
  FROM thread_heads h JOIN messages m ON m.seq=h.latest` + receipt + "WHERE h.box=? AND h.folder=? AND h.latest<? ORDER BY h.latest DESC LIMIT 41"
 	args := []any{box, box, box, box, box, folder, before}
-	if root := r.PathValue("root"); root != "" {
-		query = "SELECT " + fields + "t.root,1,0 FROM thread_members t JOIN messages m USING(seq)" + receipt + "WHERE t.root=? AND t.seq<? AND (m.sender=? OR EXISTS(SELECT 1 FROM deliveries v WHERE v.seq=m.seq AND v.seat=?)) ORDER BY t.seq DESC LIMIT 41"
-		args = []any{box, box, box, box, root, before, box, box}
+	root := r.PathValue("root")
+	after, anchor := q.Get("after"), q.Get("atSeq")
+	ascending := after != ""
+	if (ascending || anchor != "") && (root == "" || q.Get("before") != "" || ascending && anchor != "") {
+		return nil, failure{400, "Invalid thread window"}
+	}
+	cmp, direction := "<", "DESC"
+	bound := before
+	if ascending || anchor != "" {
+		value := anchor
+		cmp = "<="
+		if ascending {
+			value = after
+			cmp = ">"
+			direction = "ASC"
+		}
+		bound, e = strconv.ParseInt(value, 10, 64)
+		if e != nil || bound < 0 {
+			return nil, failure{400, "Invalid thread position"}
+		}
+	}
+	const visible = "(m.sender=? OR EXISTS(SELECT 1 FROM deliveries v WHERE v.seq=m.seq AND v.seat=?))"
+	if value := q.Get("number"); value != "" {
+		number, err := strconv.ParseInt(value, 10, 64)
+		if root == "" || err != nil || number < 1 || ascending || anchor != "" || q.Get("before") != "" || q.Get("q") != "" {
+			return nil, failure{400, "Invalid message number"}
+		}
+		err = s.store.Reader().QueryRowContext(r.Context(), "SELECT t.seq FROM thread_members t CROSS JOIN messages m USING(seq) WHERE t.root=? AND "+visible+" ORDER BY t.seq LIMIT 1 OFFSET ?", root, box, box, number-1).Scan(&bound)
+		if err == sql.ErrNoRows {
+			return nil, failure{404, "No message at that position in this conversation"}
+		}
+		if err != nil {
+			return nil, err
+		}
+		anchor = strconv.FormatInt(bound, 10)
+		cmp = "<="
+	}
+	if root != "" {
+		query = "SELECT " + fields + "t.root,1,0 FROM thread_members t CROSS JOIN messages m USING(seq)" + receipt + "WHERE t.root=? AND t.seq" + cmp + "? AND " + visible + " ORDER BY t.seq " + direction + " LIMIT 41"
+		args = []any{box, box, box, box, root, bound, box, box}
 	}
 	term := strings.TrimSpace(q.Get("q"))
 	queue := q.Get("view")
 	if len(term) > 512 || (queue != "" && (queue != "requests" || folder != "inbox")) {
 		return nil, failure{400, "Invalid mailbox filter"}
 	}
-	if r.PathValue("root") == "" && (term != "" || queue != "") {
+	searching := term != "" || queue != ""
+	var enriched bool
+	if searching {
 		// Search individual messages, including older replies hidden by a newer thread head.
 		source := "messages m"
 		_, idErr := uuid.Parse(term)
@@ -180,11 +220,25 @@ func (s *server) threads(_ http.ResponseWriter, r *http.Request) (any, error) {
 			// the entire prefix query again for every envelope in the mailbox.
 			source = "inbox_search CROSS JOIN messages m ON m.seq=inbox_search.rowid"
 		}
-		query = "SELECT " + fields + "t.root,1,0 FROM " + source + " CROSS JOIN thread_members t USING(seq)"
+		extra := ""
+		if term != "" && (strings.HasPrefix(r.URL.Path, "/api/desk/") || q.Get("preview") == "1") {
+			enriched = true
+			excerpt := "''"
+			if textSearch {
+				excerpt = "substr(snippet(inbox_search,-1,char(2),char(3),' … ',18),1,1024)"
+			}
+			extra = "," + excerpt + ",coalesce((SELECT CASE WHEN p.seq<>m.seq THEN coalesce(nullif(p.subject,''),substr(p.display_body,1,512)) END FROM thread_members f CROSS JOIN messages p USING(seq) WHERE f.root=t.root AND (p.sender=? OR EXISTS(SELECT 1 FROM deliveries rd WHERE rd.seq=p.seq AND rd.seat=?)) ORDER BY f.seq LIMIT 1), '')"
+		}
+		query = "SELECT " + fields + "t.root,1,0" + extra + " FROM " + source + " CROSS JOIN thread_members t USING(seq)"
 		args = []any{box, box}
+		if enriched {
+			args = append(args, box, box)
+		}
 		var where []string
 		order := "m.seq"
-		if folder == "inbox" {
+		if root != "" {
+			where = append(where, "t.root=? AND "+visible)
+		} else if folder == "inbox" {
 			query += " CROSS JOIN deliveries visible ON visible.seq=m.seq AND visible.seat=?"
 			args = append(args, box)
 		} else {
@@ -192,7 +246,9 @@ func (s *server) threads(_ http.ResponseWriter, r *http.Request) (any, error) {
 		}
 		query += receipt
 		args = append(args, box, box)
-		if folder == "sent" {
+		if root != "" {
+			args = append(args, root, box, box)
+		} else if folder == "sent" {
 			args = append(args, box)
 		}
 		if queue == "requests" {
@@ -209,13 +265,13 @@ func (s *server) threads(_ http.ResponseWriter, r *http.Request) (any, error) {
 					return object{"rows": []object{}, "next": nil}, nil
 				}
 				order = "inbox_search.rowid"
-				where = append(where, "inbox_search MATCH ? AND inbox_search.rowid<?")
-				args = append(args, expr, before)
+				where = append(where, "inbox_search MATCH ? AND inbox_search.rowid"+cmp+"?")
+				args = append(args, expr, bound)
 			}
 		}
-		where = append(where, "m.seq<?")
-		args = append(args, before)
-		query += " WHERE " + strings.Join(where, " AND ") + " ORDER BY " + order + " DESC LIMIT 41"
+		where = append(where, "m.seq"+cmp+"?")
+		args = append(args, bound)
+		query += " WHERE " + strings.Join(where, " AND ") + " ORDER BY " + order + " " + direction + " LIMIT 41"
 	}
 	rows, e := s.store.Reader().QueryContext(r.Context(), query, args...)
 	if e != nil {
@@ -234,10 +290,22 @@ func (s *server) threads(_ http.ResponseWriter, r *http.Request) (any, error) {
 		var n int
 		var received, opened, replied, due int64
 		var other bool
-		if e = rows.Scan(&preview, &last, &id, &src, &dst, &sub, &at, &received, &opened, &replied, &due, &root, &n, &other); e != nil {
+		var excerpt, threadTitle string
+		dest := []any{&preview, &last, &id, &src, &dst, &sub, &at, &received, &opened, &replied, &due, &root, &n, &other}
+		if enriched {
+			dest = append(dest, &excerpt, &threadTitle)
+		}
+		if e = rows.Scan(dest...); e != nil {
 			return nil, e
 		}
 		row := object{"id": id, "src": src, "dst": dst, "subject": sub, "at": at, "thread": root, "count": n, "conversation": n > 1 || other, "received": received, "opened": opened, "replied": replied}
+		if enriched || r.PathValue("root") != "" {
+			row["position"] = strconv.FormatInt(last, 10)
+		}
+		if enriched {
+			row["excerpt"] = excerpt
+			row["thread_title"] = threadTitle
+		}
 		if due > 0 {
 			row["due"] = due
 		}
@@ -245,6 +313,43 @@ func (s *server) threads(_ http.ResponseWriter, r *http.Request) (any, error) {
 			row["display"] = preview
 		}
 		result = append(result, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if e = rows.Close(); e != nil {
+		return nil, e
+	}
+	if root != "" && len(result) > 0 {
+		if ascending {
+			slices.Reverse(result)
+		}
+		var older, newer any
+		if ascending && bound > 0 || !ascending && next != nil {
+			older = result[len(result)-1]["position"]
+		}
+		if ascending && next != nil || !ascending && (q.Get("before") != "" || anchor != "") {
+			newer = result[0]["position"]
+		}
+		if anchor != "" && newer != nil {
+			var more bool
+			if e = s.store.Reader().QueryRowContext(r.Context(), "SELECT EXISTS(SELECT 1 FROM thread_members t CROSS JOIN messages m USING(seq) WHERE t.root=? AND t.seq>? AND "+visible+")", root, newer, box, box).Scan(&more); e != nil {
+				return nil, e
+			}
+			if !more {
+				newer = nil
+			}
+		}
+		// Pick a stable heading from the first envelope visible to this mailbox.
+		var title string
+		if e = s.store.Reader().QueryRowContext(r.Context(), "SELECT coalesce(nullif(m.subject,''),substr(m.display_body,1,512)) FROM thread_members t CROSS JOIN messages m USING(seq) WHERE t.root=? AND "+visible+" ORDER BY t.seq LIMIT 1", root, box, box).Scan(&title); e != nil && e != sql.ErrNoRows {
+			return nil, e
+		}
+		var receivedCount, sentCount int
+		if e = s.store.Reader().QueryRowContext(r.Context(), "SELECT coalesce(sum(CASE folder WHEN 'inbox' THEN n END),0),coalesce(sum(CASE folder WHEN 'sent' THEN n END),0) FROM thread_heads WHERE box=? AND root=? AND folder IN ('inbox','sent')", box, root).Scan(&receivedCount, &sentCount); e != nil {
+			return nil, e
+		}
+		return object{"anchor": anchor, "inbox_count": receivedCount, "sent_count": sentCount, "rows": result, "next": older, "newer": newer, "title": title}, nil
 	}
 	return object{"rows": result, "next": next}, rows.Err()
 }

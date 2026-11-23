@@ -4,7 +4,7 @@ import { MessagesSquare, CheckCheck, MailOpen, Mail, Send } from "lucide-react";
 
 export type Envelope = {
   id:string; src:string; dst:string; subject:string; at:string; thread?:string;
-  due?:number; display?:string; count?:number; conversation?:boolean; received?:number; opened?:number; replied?:number;
+  excerpt?:string; thread_title?:string; position?:string; due?:number; display?:string; count?:number; conversation?:boolean; received?:number; opened?:number; replied?:number;
 };
 export function useMailClock() {
   const [now, setNow] = useState(() => Date.now());
@@ -62,7 +62,14 @@ export function BodyText({body,external=false}:{body:string;external?:boolean}) 
   return <><pre className="letter-body">{mail.body}</pre><details className="envelope-fields">
     <summary>Message headers</summary><pre>{mail.headers.trimEnd()}</pre></details></>;
 }
-export function MailList({rows,box,sent,timeline,now,follow}:{rows:Envelope[];box:string;sent:boolean;timeline:boolean;now:number;follow:React.MouseEventHandler<HTMLAnchorElement>}) {
+function MatchExcerpt({text}:{text:string}) {
+  return <span className="match-excerpt">{text.split("\x02").map((part,i)=>{
+    if(!i)return part;
+    const end=part.indexOf("\x03");
+    return end<0?part:<Fragment key={i}><mark>{part.slice(0,end)}</mark>{part.slice(end+1)}</Fragment>;
+  })}</span>
+}
+export function MailList({rows,box,sent,timeline,query,anchor,now,follow}:{query:string;anchor:string;rows:Envelope[];box:string;sent:boolean;timeline:boolean;now:number;follow:React.MouseEventHandler<HTMLAnchorElement>}) {
   const [expanded,setExpanded] = useState<{id:string;body?:string;error?:string}|null>(null);
   const request = useRef(0);
   async function expand(id:string) {
@@ -95,13 +102,16 @@ export function MailList({rows,box,sent,timeline,now,follow}:{rows:Envelope[];bo
         <Avatar name={who}/>
         <div className="post-main"><span className="correspondent">{outgoing?"To ":""}{recipients[0].replace(/^external:/,"")}{recipients.length>1 && <span className="more-recipients" title={who}> +{recipients.length-1} more</span>}</span>
         <strong>{parsed.priority==="p0" && <span className="urgent-mail">P0</span>}{title}</strong>
-        {snippet && <span className="mail-snippet">{snippet}</span>}
+        {query && row.thread_title && <small className="thread-origin">In {splitMail(row.thread_title).subject||splitMail(row.thread_title).lead||"Conversation"}</small>}
+        {query && row.excerpt && <MatchExcerpt text={row.excerpt}/>}
+        {!query && snippet && <span className="mail-snippet">{snippet}</span>}
         {grouped && <span className="conversation-cue"><MessagesSquare size={13}/>Conversation{(row.count??0)>1?" · "+row.count+" in "+(sent?"Sent":"Inbox"):""}</span>}</div>
         <div className="post-meta"><MailTime value={stamp} now={now} label={outgoing?"Sent":"Received"}/>{row.due && !row.replied ? <span className={"request-due"+(row.due<now?" overdue":"")} title={new Date(row.due).toLocaleString()}>{row.due<now?"Overdue":"Reply due"} · {new Intl.DateTimeFormat(undefined,{hour:"numeric",minute:"2-digit",...(day(row.due,now)==="Today"?{}:{month:"short",day:"numeric"})}).format(row.due)}</span> : <Receipt row={row}/>}</div>
       </>;
     return <Fragment key={row.id}>{showDay && <h2 className="post-day">{group}</h2>}
-      {timeline ? <><button className="post-row" aria-expanded={expanded?.id===row.id} onClick={()=>void expand(row.id)}>{content}</button>
+      {timeline ? <><button className={"post-row"+(row.position===anchor?" anchored":"")} aria-expanded={expanded?.id===row.id} onClick={()=>void expand(row.id)}>{content}</button>
       {expanded?.id===row.id && <div className="thread-body">{expanded.body!==undefined?<BodyText body={expanded.body} external={row.src.startsWith("external:")}/>:<p>{expanded.error??"Opening message…"}</p>}<a href={href} onClick={follow}>Open message page →</a></div>}</>
-      : <a id={"row-"+row.id} data-message={row.id} className="post-row" href={href} onClick={follow}>{content}</a>}</Fragment>;
+      : <a id={"row-"+row.id} data-message={row.id} className="post-row" href={href} onClick={follow}>{content}</a>}
+      {query && row.position && row.thread && (timeline||row.thread!==row.id) && <a className="context-link" href={"/inboxes/"+encodeURIComponent(box)+"/threads/"+encodeURIComponent(row.thread)+"?atSeq="+row.position} onClick={follow}>View surrounding replies →</a>}</Fragment>;
   })}</div>;
 }

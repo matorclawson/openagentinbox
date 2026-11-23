@@ -70,3 +70,18 @@ html[data-palette=light]{color-scheme:light}
 .compact-list .post-meta .mail-status{background:transparent;color:var(--muted);padding:0;font-weight:450}
 .compact-list .post-meta .status-replied{color:var(--color-secondary);font-weight:600}
 .compact-list .post-row:focus-visible{outline:2px solid var(--color-secondary);outline-offset:-3px}
+.view-options{position:relative;color:var(--muted);font:550 .8rem var(--display)}
+.view-options summary{display:flex;align-items:center;gap:6px;cursor:pointer;padding:7px}
+.view-options label{position:absolute;z-index:3;right:0;top:100%;background:var(--paper);box-shadow:0 4px 16px #0002;border:1px solid var(--line);border-radius:7px;display:flex;align-items:center;gap:6px;padding:12px;white-space:nowrap}.view-options input{width:auto}
+.thread-nav{display:flex;align-items:center;gap:6px;padding:10px clamp(12px,2vw,24px);border-bottom:1px solid var(--line)}
+.thread-nav button{font:550 .8rem var(--display);padding:6px 10px}.thread-nav [aria-pressed=true]{border-color:var(--teal)}
+.thread-steps{display:flex;gap:4px;margin-left:auto}.thread-steps button:disabled{opacity:.45}
+.match-excerpt,.thread-origin{grid-column:1/-1;line-height:1.45;overflow-wrap:anywhere}.match-excerpt{color:var(--ink);font:.93rem/1.4 var(--prose)}
+.match-excerpt mark{color:inherit;background:color-mix(in srgb,var(--color-primary) 30%,var(--paper));font-weight:650;padding:0 1px}
+.thread-origin,.context-link{color:var(--muted);font:500 .76rem var(--display)}
+.context-link{display:block;padding:5px 20px 9px;color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+.shell .timeline button.anchored{box-shadow:inset 4px 0 var(--color-primary);background:var(--color-card)}
+.jump-number{display:flex;align-items:center;gap:4px}.jump-number input{width:7.2rem;padding:5px 8px;font-size:.82rem}
+.thread-nav{position:sticky;top:0;z-index:2;background:var(--paper);flex-wrap:wrap}
+@media(max-width:570px){.thread-nav{gap:4px}.thread-nav button{padding:6px}.jump-number input{width:5.8rem}.thread-steps{margin-left:0}}
+.compact-list .post-meta .status-delivered{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}

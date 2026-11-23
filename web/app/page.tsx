@@ -16,6 +16,7 @@ import {
   Plus,
 } from "lucide-react";
 import {BodyText, mailTitle, Avatar, Receipt, MailTime, MailList, useMailClock, type Envelope} from "./mail-ui";
+import {splitMail} from "./mail-text";
 import {MailTools} from "./mail-tools";
 import {SettingsPage} from "./settings";
 import {Mator} from "./brand-art";
@@ -134,11 +135,14 @@ export default function Home() {
   const [compact,setCompact]=useState(true);
   useEffect(()=>{try{setCompact(localStorage.getItem("inbox-density")!=="comfortable")}catch{}},[]);
   function toggleDensity(){setCompact(!compact);try{localStorage.setItem("inbox-density",compact?"comfortable":"compact")}catch{}}
-  function browse(query:string,pending:boolean,page=""){
+  const number=params.get("number")??"";
+  const after=params.get("after")??"", anchor=params.get("atSeq")??"";
+  const [threadInfo,setThreadInfo]=useState({newer:"",title:"",received:0,sent:0});
+  function browse(query:string,pending:boolean,page="",direction="before"){
     const params=new URLSearchParams();
     if(query)params.set("q",query);
     if(pending)params.set("view","requests");
-    if(page)params.set("before",page);
+    if(page)params.set(direction,page);
     navigate(pathname+(params.size?"?"+params:""));
   }
   const parts = pathname.split("/");
@@ -201,16 +205,21 @@ export default function Home() {
     void task(init);
     return () => window.removeEventListener("popstate", restore);
   }, []);
-  async function load(more = false) {
+  async function load() {
     const gen = ++generation.current;
     const q = new URLSearchParams({
       box,
       folder,
-      q:term,view:requests?"requests":"",before:more && cursor ? cursor : before,
+      q:term,view:requests?"requests":"",before,after,atSeq:anchor,number,
     });
     const data = await api("desk/threads"+(threadId?"/"+threadId:"")+"?" + q);
     if (gen === generation.current) {
-      list((old) => (more ? [...old, ...data.rows] : data.rows));
+      list(data.rows);
+      if(number && data.anchor){
+        const permanent=pathname+"?atSeq="+encodeURIComponent(data.anchor);
+        history.replaceState(history.state,"",permanent);setPath(permanent);
+      }
+      setThreadInfo({newer:data.newer??"",title:data.title??"",received:data.inbox_count??0,sent:data.sent_count??0});
       next(data.next);
     }
   }
@@ -225,20 +234,13 @@ export default function Home() {
     };
   }, [path, box, s?.name, acc]);
   useEffect(()=>{
-    if(before||messageId||!newest||!s?.name||(folder!=="inbox"&&folder!=="sent"))return;
+    if(threadId||before||messageId||!newest||!s?.name||(folder!=="inbox"&&folder!=="sent"))return;
     const stamp=generation.current;
     const q=new URLSearchParams({box,folder,q:term,view:requests?"requests":""});
     let cancelled=false;
     void api("desk/threads"+(threadId?"/"+threadId:"")+"?"+q).then(data=>{
       if(cancelled||stamp!==generation.current)return;
-      list(old=>{
-        const identity=(r:Row)=>threadId?r.id:r.thread??r.id;
-        const seen=new Set(data.rows.map(identity));
-        // Keep older pages only if they overlap the freshly fetched first page.
-        if(threadId && old.some(r=>seen.has(identity(r))))return [...data.rows,...old.filter(r=>!seen.has(identity(r)))];
-        return data.rows;
-      });
-      if(!threadId||!cursor||!rows.some(r=>data.rows.some((v:Row)=>v.id===r.id)))next(data.next);
+      list(data.rows); next(data.next);
     }).catch(()=>{});
     return ()=>{cancelled=true};
   },[newest,path,box,s?.name]);
@@ -497,7 +499,7 @@ export default function Home() {
                     Reply
                   </button>
                 )}
-{selected.row.thread && <a onClick={follow} href={"/inboxes/"+encodeURIComponent(readerBox)+"/threads/"+encodeURIComponent(selected.row.thread)}><MessageSquare size={15}/>View conversation</a>}</div>
+{selected.row.thread && <a onClick={follow} href={"/inboxes/"+encodeURIComponent(readerBox)+"/threads/"+encodeURIComponent(selected.row.thread)+(selected.row.position?"?atSeq="+selected.row.position:"")}><MessageSquare size={15}/>View conversation</a>}</div>
                 {selected.row.original_available && <button onClick={()=>void task(async()=>{
                   const data=await api("desk/email-original/"+selected.row.id);
                   const blob=new Blob([Uint8Array.from(atob(data.base64),c=>c.charCodeAt(0))],{type:"application/octet-stream"});
@@ -720,19 +722,23 @@ export default function Home() {
           ) : (
             <>
               <div className="mail-heading">
-                <div><h1>{threadId?(rows[0]?mailTitle(rows[0]):"Conversation"):folder==="sent"?"Sent":"Inbox"}</h1><p>{threadId?"Conversation · ":""}{box}</p></div>
+                <div><h1>{threadId?(splitMail(threadInfo.title).subject||splitMail(threadInfo.title).lead||"Conversation"):folder==="sent"?"Sent":"Inbox"}</h1><p>{threadId?"Conversation · ":""}{box}{threadId && threadInfo.received+threadInfo.sent>0 && <> · {threadInfo.received.toLocaleString()} received · {threadInfo.sent.toLocaleString()} sent</>}</p></div>
                 <button aria-label="Refresh messages" disabled={busy} onClick={()=>void task(()=>load())}><RefreshCw size={16}/></button>
               </div>
               <div className="mail-panel">
-                <div className="mail-tabs">
-                  <a aria-current={!threadId&&folder==="inbox"?"page":undefined} href={"/inboxes/"+encodeURIComponent(box)} onClick={follow}><Inbox size={15}/>Inbox</a>
-                  <a aria-current={!threadId&&folder==="sent"?"page":undefined} href={"/inboxes/"+encodeURIComponent(box)+"/sent"} onClick={follow}><Send size={15}/>Sent</a>
-                  {threadId && <span><Layers size={15}/>Conversation</span>}
-                </div>
-                {!threadId && <MailTools query={term} requests={requests} sent={folder==="sent"} compact={compact} toggle={toggleDensity} apply={browse}/>}
-                {(term||requests||before) && <div className="results-line" role="status">{term?"Matches for “"+term+"”":requests?"Open requests":"Older conversations"} · {rows.length} on this page</div>}
+                <MailTools thread={!!threadId} query={term} requests={requests} sent={folder==="sent"} compact={compact} toggle={toggleDensity} apply={browse}/>
+                {threadId && <nav className="thread-nav" aria-label="Conversation navigation">
+                  <button aria-pressed={!before&&!after&&!anchor} onClick={()=>before||after||anchor?browse(term,false):void task(()=>load())}>Latest</button>
+                  <button aria-pressed={after==="0"} onClick={()=>browse(term,false,"0","after")}>First</button>
+                  {!term && <form className="jump-number" onSubmit={e=>{e.preventDefault();const value=new FormData(e.currentTarget).get("number");if(value)browse("",false,String(value),"number")}}>
+                    <input aria-label="Message number from the beginning" placeholder="Message #" name="number" min="1" type="number" required/><button>Jump</button>
+                  </form>}
+                  <span className="thread-steps"><button disabled={!cursor||busy} onClick={()=>browse(term,false,cursor!)}>← Older</button>
+                  <button disabled={!threadInfo.newer||busy} onClick={()=>browse(term,false,threadInfo.newer,"after")}>Newer →</button></span>
+                </nav>}
+                {(threadId||term||requests||before) && <div className="results-line" role="status">{term?"Matches for “"+term+"”":requests?"Open requests":threadId?"Newest first":"Older conversations"} · {rows.length} on this page</div>}
                 <div className={!threadId&&compact?"compact-list":""}>
-                <MailList key={path} rows={rows} box={box} sent={folder==="sent"} timeline={!!threadId} now={now} follow={follow}/></div>
+                <MailList key={path} rows={rows} box={box} sent={folder==="sent"} timeline={!!threadId} query={term} anchor={anchor} now={now} follow={follow}/></div>
 
                 {!rows.length && (
                   <div className="empty">
@@ -745,11 +751,11 @@ export default function Home() {
                     )}
                   </div>
                 )}
-                {before && <button onClick={()=>browse(term,requests)}>Back to newest</button>}
-                {cursor && (
+                {!threadId && before && <button onClick={()=>browse(term,requests)}>Back to newest</button>}
+                {!threadId && cursor && (
                   <button
                     disabled={busy}
-                    onClick={() => threadId ? void task(() => load(true)) : browse(term,requests,cursor)}
+                    onClick={() => browse(term,requests,cursor)}
                   >
                     Load older messages
                   </button>

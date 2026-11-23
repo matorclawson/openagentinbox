@@ -314,7 +314,7 @@ func (s *server) detail(_ http.ResponseWriter, r *http.Request) (any, error) {
 		return nil, failure{400, "Invalid ID"}
 	}
 
-	var src, dst, sub, body, at, root, audience string
+	var src, dst, sub, body, at, root, audience, position string
 	var opened, replied, due int64
 	var state string
 	audienceField := "''"
@@ -322,7 +322,7 @@ func (s *server) detail(_ http.ResponseWriter, r *http.Request) (any, error) {
 	if desk {
 		audienceField = "(SELECT group_concat(seat,', ') FROM deliveries WHERE seq=m.seq)"
 	}
-	query := "SELECT " + audienceField + `,coalesce((SELECT root FROM thread_members WHERE seq=m.seq),m.id),m.sender,d.seat,m.subject,m.body,m.created_text,coalesce(r.opened,0),coalesce(r.replied,0),coalesce(r.state,'fyi'),coalesce(r.due,0) FROM messages m JOIN deliveries d USING(seq) LEFT JOIN mail_receipts r ON r.id=m.id AND r.seat=d.seat WHERE m.id=?`
+	query := "SELECT " + audienceField + `,m.seq,coalesce((SELECT root FROM thread_members WHERE seq=m.seq),m.id),m.sender,d.seat,m.subject,m.body,m.created_text,coalesce(r.opened,0),coalesce(r.replied,0),coalesce(r.state,'fyi'),coalesce(r.due,0) FROM messages m JOIN deliveries d USING(seq) LEFT JOIN mail_receipts r ON r.id=m.id AND r.seat=d.seat WHERE m.id=?`
 	args := []any{id}
 	if strings.HasPrefix(r.URL.Path, "/api/agent/") {
 		query += " AND (m.sender=? OR d.seat=? OR EXISTS(SELECT 1 FROM message_readers WHERE id=m.id AND seat=?))"
@@ -332,7 +332,7 @@ func (s *server) detail(_ http.ResponseWriter, r *http.Request) (any, error) {
 		query += " ORDER BY (d.seat=?) DESC,d.seat LIMIT 1"
 		args = append(args, actor)
 	}
-	e = s.store.Reader().QueryRowContext(r.Context(), query, args...).Scan(&audience, &root, &src, &dst, &sub, &body, &at, &opened, &replied, &state, &due)
+	e = s.store.Reader().QueryRowContext(r.Context(), query, args...).Scan(&audience, &position, &root, &src, &dst, &sub, &body, &at, &opened, &replied, &state, &due)
 	if e != nil {
 		return nil, e
 	}
@@ -350,6 +350,9 @@ func (s *server) detail(_ http.ResponseWriter, r *http.Request) (any, error) {
 	}
 	s.performance.observe(false, "", time.Since(started))
 	result := object{"id": id, "thread": root, "src": src, "dst": dst, "subject": sub, "body": body, "at": at, "opened": opened, "replied": replied, "state": state, "due": due}
+	if desk {
+		result["position"] = position
+	}
 	if strings.Contains(audience, ", ") {
 		result["audience"] = strings.Split(audience, ", ")
 	}

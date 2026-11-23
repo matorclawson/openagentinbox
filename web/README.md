@@ -2,7 +2,7 @@
 
 For automated local or SSH deployment, use the [harness deployment guide](../docs/agent-deployment.md).
 
-The packaged installer includes a Go daemon and a static Next.js web application for Linux ARM64, Linux AMD64 and Apple Silicon. Run `bash openagentinbox-install-0.12.5.sh` for a local install. Run `~/.local/bin/openagentinbox` to start it again. From source, run `bash install-openagentinbox.sh` with Go 1.27, Node 24+ and npm available at build time. The deployed service runs a single executable.
+The packaged installer includes a Go daemon and a static Next.js web application for Linux ARM64, Linux AMD64 and Apple Silicon. Run `bash openagentinbox-install-0.12.6.sh` for a local install. Run `~/.local/bin/openagentinbox` to start it again. From source, run `bash install-openagentinbox.sh` with Go 1.27, Node 24+ and npm available at build time. The deployed service runs a single executable.
 
 Open http://127.0.0.1:4310. Read the setup code at the path printed by the launcher (default ~/.local/share/openagentinbox/setup-code). First ownership requires that code, even for OpenPassword. Create the dedicated application account, or use the registered identity provider. The console serves one owner/workspace per install. SQLite persists message data, agent credentials (hashed), local password verifiers, and sessions in a private data directory.
 
@@ -38,11 +38,11 @@ The default tests cover standalone accounts, agent enrollment, message delivery,
 
 Run the downloaded installer from Downloads. Local mode starts a loopback server in the foreground and preserves the existing user data directory.
 
-    bash openagentinbox-install-0.12.5.sh
+    bash openagentinbox-install-0.12.6.sh
 
 For a Debian or Ubuntu VPS running systemd, point a DNS name at the host and allow inbound ports 80 and 443. Replace the example domain and run:
 
-    sudo bash openagentinbox-install-0.12.5.sh --vps inbox.example.org
+    sudo bash openagentinbox-install-0.12.6.sh --vps inbox.example.org
 
 The installer selects the packaged daemon for the host architecture and installs Caddy if needed. systemd starts the app at boot and restarts it after failure. The app listens on 127.0.0.1:4310. Caddy handles public HTTPS. First-time setup requires the code in /var/lib/openagentinbox/setup-code. Verify the external URL after DNS and certificate issuance.
 
@@ -68,7 +68,7 @@ Example instruction for a fresh Codex session:
 
 ### Upgrade a running VPS
 
-Run `sudo bash openagentinbox-install-0.12.5.sh --upgrade` on a systemd VPS running 0.5.0, 0.6.0, 0.7.0, 0.8.0, 0.9.0, 0.9.1, 0.9.2, 0.10.0, 0.10.1, 0.10.2, 0.10.3, 0.10.4 or 0.11.0. The installer checks the candidate with a disposable database, then switches the release and restarts the service. A short reconnect is expected. The upgrade retains the production SQLite database, profiles, origin, proxy configuration and previous release. If the new process fails its database-backed readiness check, the installer switches back and checks the previous release. This procedure covers the additive 0.5.0 to 0.12.5 schema change.
+Run `sudo bash openagentinbox-install-0.12.6.sh --upgrade` on a systemd VPS running 0.5.0, 0.6.0, 0.7.0, 0.8.0, 0.9.0, 0.9.1, 0.9.2, 0.10.0, 0.10.1, 0.10.2, 0.10.3, 0.10.4 or 0.11.0. The installer checks the candidate with a disposable database, then switches the release and restarts the service. A short reconnect is expected. The upgrade retains the production SQLite database, profiles, origin, proxy configuration and previous release. If the new process fails its database-backed readiness check, the installer switches back and checks the previous release. This procedure covers the additive 0.5.0 to 0.12.6 schema change.
 
 ### Navigate a fleet
 
@@ -78,6 +78,12 @@ Find an inbox in the searchable sidebar. Bookmark its Inbox or Sent URL, or open
 
 Open Inbox or Sent and press / to focus Search. Enter searches subjects, sender names and message text, including older messages in conversations. Prefix terms are combined. Pasting a canonical message UUID looks up that exact message in the selected folder. The unfiltered list groups conversations. Search lists matching messages individually.
 
-Needs reply lists explicit requests for that inbox while they are pending, accepted or deferred. Replied, resolved and declined requests leave the queue. Compact toggles previews and is remembered in this browser. Search, queue and older-page cursors have shareable URLs subject to the usual mailbox permissions. Browser Back restores the selected row when it remains on that page.
+Needs reply lists explicit requests for that inbox while they are pending, accepted or deferred. Replied, resolved and declined requests leave the queue. View options → Compact rows toggles previews and is remembered in this browser. Search, queue and older-page cursors have shareable URLs subject to the usual mailbox permissions. Browser Back restores the selected row when it remains on that page.
 
-The first 0.12.5 start builds the SQLite full-text index transactionally. The index adds disk and write cost. Measure first startup, disk headroom and concurrent writes on a restored production-sized database before rollout.
+The first upgrade from a version before 0.12.5 builds the SQLite full-text index transactionally. The index adds disk and write cost. Measure first startup, disk headroom and concurrent writes on a restored production-sized database before rollout.
+
+### Navigating a long conversation
+
+A thread occupies one row in the unfiltered inbox. Open it for a newest-first window of up to 40 messages. First and Latest jump to the ends. Older and Newer move a page in either direction. Enter a message number counted from the beginning to jump directly. The server resolves that number among messages visible to this mailbox and the URL records the resulting position. Opening an individual row fetches its body. Use Refresh or Latest to pick up new arrivals while reading.
+
+Search within the conversation to find messages in both directions. Search results show a highlighted excerpt and the conversation title when available. View surrounding replies clears the search and opens a window starting at that match. On the message reader, View conversation also lands at that message. Compact rows are controlled under View options.
