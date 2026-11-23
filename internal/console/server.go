@@ -160,6 +160,9 @@ func Run() error {
 	if e = initThreads(s.db); e != nil {
 		return e
 	}
+	if e = initMailSearch(s.db); e != nil {
+		return e
+	}
 	var owners int
 	if e = s.store.Reader().QueryRow("SELECT count(*) FROM owner").Scan(&owners); e != nil {
 		return e
@@ -202,7 +205,7 @@ func Run() error {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		json.NewEncoder(w).Encode(object{"product": "openagentinbox", "version": "0.12.4", "instance": instance, "setup": n == 0})
+		json.NewEncoder(w).Encode(object{"product": "openagentinbox", "version": "0.12.5", "instance": instance, "setup": n == 0})
 	})
 	s.live.draining = make(chan struct{})
 	s.routes(mux)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"github.com/google/uuid"
 	"net/http"
 	"net/mail"
 	"strconv"
@@ -151,7 +152,7 @@ func (s *server) threads(_ http.ResponseWriter, r *http.Request) (any, error) {
 	if strings.HasPrefix(r.URL.Path, "/api/desk/") || q.Get("preview") == "1" {
 		previewField = "substr(m.display_body,1,768)"
 	}
-	fields := previewField + ",m.seq,m.id,m.sender,CASE WHEN m.sender=? THEN coalesce((SELECT group_concat(seat,', ') FROM deliveries WHERE seq=m.seq),'') ELSE ? END,m.subject,m.created_text,coalesce(d.accepted_at,0),coalesce(r.opened,0),coalesce(r.replied,0),"
+	fields := previewField + ",m.seq,m.id,m.sender,CASE WHEN m.sender=? THEN coalesce((SELECT group_concat(seat,', ') FROM deliveries WHERE seq=m.seq),'') ELSE ? END,m.subject,m.created_text,coalesce(d.accepted_at,0),coalesce(r.opened,0),coalesce(r.replied,0),coalesce(r.due,0),"
 	// Each page reads only the latest envelope and its recipient-scoped receipt.
 	// For a fan-out send there is no single recipient whose open represents the group.
 	const receipt = ` LEFT JOIN deliveries d ON d.seq=m.seq AND d.seat=CASE WHEN m.sender=? THEN
@@ -163,6 +164,58 @@ func (s *server) threads(_ http.ResponseWriter, r *http.Request) (any, error) {
 	if root := r.PathValue("root"); root != "" {
 		query = "SELECT " + fields + "t.root,1,0 FROM thread_members t JOIN messages m USING(seq)" + receipt + "WHERE t.root=? AND t.seq<? AND (m.sender=? OR EXISTS(SELECT 1 FROM deliveries v WHERE v.seq=m.seq AND v.seat=?)) ORDER BY t.seq DESC LIMIT 41"
 		args = []any{box, box, box, box, root, before, box, box}
+	}
+	term := strings.TrimSpace(q.Get("q"))
+	queue := q.Get("view")
+	if len(term) > 512 || (queue != "" && (queue != "requests" || folder != "inbox")) {
+		return nil, failure{400, "Invalid mailbox filter"}
+	}
+	if r.PathValue("root") == "" && (term != "" || queue != "") {
+		// Search individual messages, including older replies hidden by a newer thread head.
+		source := "messages m"
+		_, idErr := uuid.Parse(term)
+		textSearch := term != "" && idErr != nil
+		if textSearch {
+			// Drive newest-first from matching postings. SQLite otherwise may run
+			// the entire prefix query again for every envelope in the mailbox.
+			source = "inbox_search CROSS JOIN messages m ON m.seq=inbox_search.rowid"
+		}
+		query = "SELECT " + fields + "t.root,1,0 FROM " + source + " CROSS JOIN thread_members t USING(seq)"
+		args = []any{box, box}
+		var where []string
+		order := "m.seq"
+		if folder == "inbox" {
+			query += " CROSS JOIN deliveries visible ON visible.seq=m.seq AND visible.seat=?"
+			args = append(args, box)
+		} else {
+			where = append(where, "m.sender=?")
+		}
+		query += receipt
+		args = append(args, box, box)
+		if folder == "sent" {
+			args = append(args, box)
+		}
+		if queue == "requests" {
+			where = append(where, "m.id IN (SELECT id FROM mail_receipts WHERE seat=? AND state IN ('pending','accepted','deferred'))")
+			args = append(args, box)
+		}
+		if term != "" {
+			if !textSearch {
+				where = append(where, "m.id=?")
+				args = append(args, strings.ToLower(term))
+			} else {
+				expr := searchWords(term)
+				if expr == "" {
+					return object{"rows": []object{}, "next": nil}, nil
+				}
+				order = "inbox_search.rowid"
+				where = append(where, "inbox_search MATCH ? AND inbox_search.rowid<?")
+				args = append(args, expr, before)
+			}
+		}
+		where = append(where, "m.seq<?")
+		args = append(args, before)
+		query += " WHERE " + strings.Join(where, " AND ") + " ORDER BY " + order + " DESC LIMIT 41"
 	}
 	rows, e := s.store.Reader().QueryContext(r.Context(), query, args...)
 	if e != nil {
@@ -179,12 +232,15 @@ func (s *server) threads(_ http.ResponseWriter, r *http.Request) (any, error) {
 		}
 		var preview, id, src, dst, sub, at, root string
 		var n int
-		var received, opened, replied int64
+		var received, opened, replied, due int64
 		var other bool
-		if e = rows.Scan(&preview, &last, &id, &src, &dst, &sub, &at, &received, &opened, &replied, &root, &n, &other); e != nil {
+		if e = rows.Scan(&preview, &last, &id, &src, &dst, &sub, &at, &received, &opened, &replied, &due, &root, &n, &other); e != nil {
 			return nil, e
 		}
 		row := object{"id": id, "src": src, "dst": dst, "subject": sub, "at": at, "thread": root, "count": n, "conversation": n > 1 || other, "received": received, "opened": opened, "replied": replied}
+		if due > 0 {
+			row["due"] = due
+		}
 		if preview != "" {
 			row["display"] = preview
 		}

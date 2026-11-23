@@ -96,6 +96,36 @@ with tempfile.TemporaryDirectory() as root:
             page.get_by_label("Find an inbox").fill("design")
             page.locator(".directory-list a").first.click()
             assert page.url.endswith("/inboxes/design-systems")
+            req=post("agent/send",{"to":"architect","subject":"Choose a release window","body":"Staging is ready.\n\nCompare the heliograph timings before approving.","key":str(uuid.uuid4()),"intent":"request"},tokens["studio-review"])["id"]
+            send("architect","studio-review","Other work in this thread","Routine check.",opened)
+            page.set_viewport_size({"width":1440,"height":910})
+            page.goto(url+"/inboxes/architect")
+            page.get_by_role("button",name="Needs reply",exact=True).click()
+            page.locator(".post-row").first.wait_for()
+            assert page.locator(".post-row").count()==1
+            page.get_by_role("button",name="All conversations").click()
+            search=page.get_by_label("Search messages")
+            page.keyboard.press("/")
+            assert search.evaluate("el=>document.activeElement===el")
+            for term in ("heliograph",req):
+                search.fill(term);search.press("Enter")
+                page.wait_for_function("document.querySelectorAll('.post-row').length===1")
+                assert page.locator(".post-row").first.get_attribute("data-message")==req
+            headers={"Authorization":"Bearer "+tokens["build-engineer"]}
+            assert page.request.get(url+"/api/agent/threads?box=architect&q=heliograph",headers=headers).json()["rows"]==[]
+            page.goto(url+"/inboxes/architect")
+            page.get_by_role("button",name="Load older messages").click()
+            page.wait_for_function("new URLSearchParams(location.search).has('before') && document.querySelectorAll('.post-row').length<40 && document.querySelector('.post-row')")
+            row=page.locator(".post-row").last
+            anchor=row.get_attribute("id")
+            older=page.url
+            row.click();page.go_back()
+            page.wait_for_function("id=>document.activeElement.id===id",arg=anchor)
+            assert page.url==older
+            send("architect","studio-review","Decision","Window approved.",req)
+            res=page.request.get(url+"/api/desk/threads?box=architect&view=requests").json()
+            assert not res["rows"]
+            print("PASS: individual request triage, resolved request removed, body and exact ID search, mailbox isolation, keyboard focus and paginated return.")
             print("PASS: 40 conversation heads, linked replies, singleton and direct routes, receipt states, relative and previous-day timestamps, inline body, desktop and mobile layout, directory navigation.")
             b.close()
     finally:proc.terminate();proc.wait(timeout=10)

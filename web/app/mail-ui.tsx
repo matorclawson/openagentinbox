@@ -4,7 +4,7 @@ import { MessagesSquare, CheckCheck, MailOpen, Mail, Send } from "lucide-react";
 
 export type Envelope = {
   id:string; src:string; dst:string; subject:string; at:string; thread?:string;
-  display?:string; count?:number; conversation?:boolean; received?:number; opened?:number; replied?:number;
+  due?:number; display?:string; count?:number; conversation?:boolean; received?:number; opened?:number; replied?:number;
 };
 export function useMailClock() {
   const [now, setNow] = useState(() => Date.now());
@@ -97,11 +97,11 @@ export function MailList({rows,box,sent,timeline,now,follow}:{rows:Envelope[];bo
         <strong>{parsed.priority==="p0" && <span className="urgent-mail">P0</span>}{title}</strong>
         {snippet && <span className="mail-snippet">{snippet}</span>}
         {grouped && <span className="conversation-cue"><MessagesSquare size={13}/>Conversation{(row.count??0)>1?" · "+row.count+" in "+(sent?"Sent":"Inbox"):""}</span>}</div>
-        <div className="post-meta"><MailTime value={stamp} now={now} label={outgoing?"Sent":"Received"}/><Receipt row={row}/></div>
+        <div className="post-meta"><MailTime value={stamp} now={now} label={outgoing?"Sent":"Received"}/>{row.due && !row.replied ? <span className={"request-due"+(row.due<now?" overdue":"")} title={new Date(row.due).toLocaleString()}>{row.due<now?"Overdue":"Reply due"} · {new Intl.DateTimeFormat(undefined,{hour:"numeric",minute:"2-digit",...(day(row.due,now)==="Today"?{}:{month:"short",day:"numeric"})}).format(row.due)}</span> : <Receipt row={row}/>}</div>
       </>;
     return <Fragment key={row.id}>{showDay && <h2 className="post-day">{group}</h2>}
       {timeline ? <><button className="post-row" aria-expanded={expanded?.id===row.id} onClick={()=>void expand(row.id)}>{content}</button>
       {expanded?.id===row.id && <div className="thread-body">{expanded.body!==undefined?<BodyText body={expanded.body} external={row.src.startsWith("external:")}/>:<p>{expanded.error??"Opening message…"}</p>}<a href={href} onClick={follow}>Open message page →</a></div>}</>
-      : <a className="post-row" href={href} onClick={follow}>{content}</a>}</Fragment>;
+      : <a id={"row-"+row.id} data-message={row.id} className="post-row" href={href} onClick={follow}>{content}</a>}</Fragment>;
   })}</div>;
 }

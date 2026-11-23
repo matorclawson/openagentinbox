@@ -97,7 +97,7 @@ test("setup, idempotent conversations, agent isolation, revocation and restart",
           headers: auth,
         })
       ).statusCode,
-      404,
+      200, // The sender can read its own Sent message.
     );
     await a.close();
     a = await service({ dir, origin });
@@ -316,13 +316,13 @@ test("MCP uses the enrolled identity, the HTTP mailbox and the same retry key", 
  const token=agent.credential;
  const rpc=(method:string,params:object={},credential=token)=>a.inject({method:"POST",url:"/mcp",headers:{authorization:"Bearer "+credential},payload:{jsonrpc:"2.0",id:1,method,params}});
  assert.equal((await rpc("tools/list",{},"bogus")).statusCode,401);
- assert.deepEqual((await rpc("tools/list")).json().result.tools.map((t:{name:string})=>t.name),["whoami","inbox","read","send","receipt","request","alerts"]);
+ assert.deepEqual((await rpc("tools/list")).json().result.tools.map((t:{name:string})=>t.name),["whoami","inbox","sent","threads","read","send","receipt","request","alerts"]);
  const msg={to:"operator",subject:"MCP report",body:"One copy",key:randomUUID()};
  const sent=(await rpc("tools/call",{name:"send",arguments:msg})).json().result;assert.equal(sent.isError,false);
  const id=JSON.parse(sent.content[0].text).id;
  assert.equal((await a.inject({method:"POST",url:"/api/agent/send",headers:{authorization:"Bearer "+token},payload:msg})).json().id,id);
  const rows=(await a.inject({url:"/api/desk/list",headers:{cookie:owner}})).json().rows;assert.deepEqual(rows.map((m:{id:string})=>m.id),[id]);
- assert.equal((await rpc("tools/call",{name:"read",arguments:{id}})).json().result.isError,true);
+ assert.equal((await rpc("tools/call",{name:"read",arguments:{id}})).json().result.isError,false);
  const incoming=(await post(a,"/api/desk/send",{...msg,to:"researcher"},owner)).json().id;
  const profile=join(dir,"agent.json");writeFileSync(profile,JSON.stringify({name:"researcher",token,origin:a.base}),{mode:0o600});
  const child=spawn(process.execPath,["out/openagentinbox.mjs","mcp"],{env:{...process.env,OPENAGENTINBOX_PROFILE:profile}});

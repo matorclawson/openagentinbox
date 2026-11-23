@@ -67,7 +67,9 @@ with tempfile.TemporaryDirectory() as data, socket.socket() as sock:
             page.goto(base+"/inboxes/operator")
             page.locator(".post-row").first.wait_for()
             page.get_by_role("button",name="Load older messages").click()
-            page.wait_for_function("document.querySelectorAll('.post-row').length===41")
+            page.wait_for_function("document.querySelectorAll('.post-row').length===1")
+            page.get_by_text("Back to newest").click()
+            page.wait_for_function("document.querySelectorAll('.post-row').length===40")
             assert page.locator(".urgent-mail").count()>=1
             assert all(t not in ("(No subject)","Priority: p1","Priority: p2")
                        for t in page.locator(".post-main strong").all_text_contents())
@@ -85,6 +87,21 @@ with tempfile.TemporaryDirectory() as data, socket.socket() as sock:
                 assert page.evaluate("family => [...document.fonts].some(f=>f.family.replaceAll('\"','')===family && f.status==='loaded')",family)
             assert "Source Serif 4" in page.locator(".letter-body").evaluate("node=>getComputedStyle(node).fontFamily")
             assert page.evaluate("document.documentElement.scrollWidth<=innerWidth")
+            # Measure retrieval only. Fixture inserts bypass transport so this is not a send benchmark.
+            with sqlite3.connect(os.path.join(data,"console.sqlite")) as db:
+                for index,record in enumerate(records):
+                    body=record["body"]
+                    row=db.execute("INSERT INTO messages(id,sender,subject,created_at,bytes,body,display_body,created_text) VALUES(?,?,?,1,?,?,?,?)",
+                        (str(uuid.uuid4()),"sender","Archive "+str(index),len(body.encode()),body.encode(),body[:160],"2026-11-20T12:00:00Z"))
+                    db.execute("INSERT INTO deliveries(seat,seq,accepted_at) VALUES('operator',?,1)",(row.lastrowid,))
+            from statistics import median
+            timings=[]
+            for attempt in range(22):
+                start=time.perf_counter()
+                result=page.request.get(base+"/api/desk/threads?box=operator&q=review")
+                assert result.ok and result.json()["rows"]
+                if attempt>=2:timings.append((time.perf_counter()-start)*1000)
+            print(f"Loaded {len(records)} export bodies; common term, warm loopback Playwright HTTP requests: median {median(timings):.1f} ms, p95 {sorted(timings)[18]:.1f} ms (20 samples).")
             browser.close()
             print("PASS: 41 actual bodies, priority and subject fallback, pagination, raw headers and 1440/390px layouts.")
     finally:

@@ -16,6 +16,7 @@ import {
   Plus,
 } from "lucide-react";
 import {BodyText, mailTitle, Avatar, Receipt, MailTime, MailList, useMailClock, type Envelope} from "./mail-ui";
+import {MailTools} from "./mail-tools";
 import {SettingsPage} from "./settings";
 import {Mator} from "./brand-art";
 import {MailSetup} from "./mail-setup";
@@ -127,7 +128,20 @@ export default function Home() {
   const [path, setPath] = useState("/");
   const [filter, setFilter] = useState("");
   const [shareSeat, setShareSeat] = useState("");
-  const parts = path.split("/");
+  const [pathname,queryString=""]=path.split("?");
+  const params=new URLSearchParams(queryString);
+  const term=params.get("q")??"", requests=params.get("view")==="requests", before=params.get("before")??"";
+  const [compact,setCompact]=useState(true);
+  useEffect(()=>{try{setCompact(localStorage.getItem("inbox-density")!=="comfortable")}catch{}},[]);
+  function toggleDensity(){setCompact(!compact);try{localStorage.setItem("inbox-density",compact?"comfortable":"compact")}catch{}}
+  function browse(query:string,pending:boolean,page=""){
+    const params=new URLSearchParams();
+    if(query)params.set("q",query);
+    if(pending)params.set("view","requests");
+    if(page)params.set("before",page);
+    navigate(pathname+(params.size?"?"+params:""));
+  }
+  const parts = pathname.split("/");
   const box = parts[1] === "inboxes" ? parts[2] : acc?.operator ?? "operator";
   const threadId=parts[3]==="threads"?parts[4]:"";
  const folder = parts[1]==="settings"?"settings":parts[1]==="mail-setup"?"mail-setup":parts[1] === "activity" ? "activity" : parts[1] === "compose" ? "compose" : parts[1] === "agents" ? "agents" : parts[3] === "sent" ? "sent" : "inbox";
@@ -168,7 +182,7 @@ export default function Home() {
     if (info.name) {
       const a = await api("desk/accounts");
       accounts(a);
-      navigate(location.pathname === "/" ? "/inboxes/" + a.operator : location.pathname, true);
+      if(location.pathname==="/")navigate("/inboxes/"+a.operator,true);else setPath(location.pathname+location.search);
       const c = sessionStorage.getItem("enrollment");
       if (c) {
         navigate("/agents", true);
@@ -182,7 +196,7 @@ export default function Home() {
     }
   }
   useEffect(() => {
-    const restore = () => { setPath(location.pathname); warn(""); say(""); key(""); };
+    const restore = () => { setPath(location.pathname+location.search); warn(""); say(""); key(""); };
     window.addEventListener("popstate", restore);
     void task(init);
     return () => window.removeEventListener("popstate", restore);
@@ -192,7 +206,7 @@ export default function Home() {
     const q = new URLSearchParams({
       box,
       folder,
-      ...(more && cursor ? { before: cursor } : {}),
+      q:term,view:requests?"requests":"",before:more && cursor ? cursor : before,
     });
     const data = await api("desk/threads"+(threadId?"/"+threadId:"")+"?" + q);
     if (gen === generation.current) {
@@ -209,11 +223,11 @@ export default function Home() {
     return () => {
       generation.current++;
     };
-  }, [folder, box, threadId,messageId, s?.name, acc]);
+  }, [path, box, s?.name, acc]);
   useEffect(()=>{
-    if(messageId||!newest||!s?.name||(folder!=="inbox"&&folder!=="sent"))return;
+    if(before||messageId||!newest||!s?.name||(folder!=="inbox"&&folder!=="sent"))return;
     const stamp=generation.current;
-    const q=new URLSearchParams({box,folder});
+    const q=new URLSearchParams({box,folder,q:term,view:requests?"requests":""});
     let cancelled=false;
     void api("desk/threads"+(threadId?"/"+threadId:"")+"?"+q).then(data=>{
       if(cancelled||stamp!==generation.current)return;
@@ -221,13 +235,13 @@ export default function Home() {
         const identity=(r:Row)=>threadId?r.id:r.thread??r.id;
         const seen=new Set(data.rows.map(identity));
         // Keep older pages only if they overlap the freshly fetched first page.
-        if(old.some(r=>seen.has(identity(r))))return [...data.rows,...old.filter(r=>!seen.has(identity(r)))];
+        if(threadId && old.some(r=>seen.has(identity(r))))return [...data.rows,...old.filter(r=>!seen.has(identity(r)))];
         return data.rows;
       });
-      if(!cursor||!rows.some(r=>data.rows.some((v:Row)=>v.id===r.id)))next(data.next);
+      if(!threadId||!cursor||!rows.some(r=>data.rows.some((v:Row)=>v.id===r.id)))next(data.next);
     }).catch(()=>{});
     return ()=>{cancelled=true};
-  },[newest,folder,box,threadId,messageId,s?.name]);
+  },[newest,path,box,s?.name]);
   useEffect(() => {
     select(null);
     setShareSeat("");
@@ -248,7 +262,7 @@ export default function Home() {
   },[live?.cursor,messageId,s?.name]);
   function navigate(to: string, replace = false) {
     if (replace) history.replaceState(null, "", to);
-    else if (location.pathname !== to) history.pushState({from:location.pathname}, "", to);
+    else if (location.pathname+location.search !== to) history.pushState({from:location.pathname}, "", to);
     setMenu(false);
     setPath(to);
     key(""); warn(""); say("");
@@ -256,9 +270,15 @@ export default function Home() {
   function go(v: typeof folder, seat = box) {
     navigate(v==="settings" || v==="mail-setup" || v === "activity" || v === "compose" || v === "agents" ? "/" + v : "/inboxes/" + encodeURIComponent(seat) + (v === "sent" ? "/sent" : ""));
   }
+  useEffect(()=>{
+    if(!rows.length||!history.state?.mailAnchor)return;
+    const id=history.state.mailAnchor;
+    const row=document.getElementById("row-"+id);
+    if(row){history.replaceState({...history.state,mailAnchor:null},"");row.focus({preventScroll:true});row.scrollIntoView({block:"nearest"})}
+  },[rows]);
   function follow(e: React.MouseEvent<HTMLAnchorElement>) {
     if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey && e.button === 0) {
-      e.preventDefault(); navigate(e.currentTarget.pathname);
+      e.preventDefault(); if(e.currentTarget.dataset.message)history.replaceState({...history.state,mailAnchor:e.currentTarget.dataset.message},""); navigate(e.currentTarget.pathname+e.currentTarget.search);
     }
   }
   async function copy(value: string, success: string) {
@@ -385,7 +405,7 @@ export default function Home() {
       </main>
     );
   const previousPath = typeof window==="undefined" ? "" : String(history.state?.from??"");
-  const fromBox = /^\/inboxes\/([^/]+)/.exec(previousPath)?.[1];
+  const fromBox = /^\/inboxes\/([^/?]+)/.exec(previousPath)?.[1];
   const readerBox = fromBox || (selected?.row.dst.includes("@") || selected?.row.src===acc.operator ? selected?.row.src : selected?.row.dst) || acc.operator;
   return (
     <main className="shell">
@@ -709,22 +729,27 @@ export default function Home() {
                   <a aria-current={!threadId&&folder==="sent"?"page":undefined} href={"/inboxes/"+encodeURIComponent(box)+"/sent"} onClick={follow}><Send size={15}/>Sent</a>
                   {threadId && <span><Layers size={15}/>Conversation</span>}
                 </div>
-                <MailList key={path} rows={rows} box={box} sent={folder==="sent"} timeline={!!threadId} now={now} follow={follow}/>
+                {!threadId && <MailTools query={term} requests={requests} sent={folder==="sent"} compact={compact} toggle={toggleDensity} apply={browse}/>}
+                {(term||requests||before) && <div className="results-line" role="status">{term?"Matches for “"+term+"”":requests?"Open requests":"Older conversations"} · {rows.length} on this page</div>}
+                <div className={!threadId&&compact?"compact-list":""}>
+                <MailList key={path} rows={rows} box={box} sent={folder==="sent"} timeline={!!threadId} now={now} follow={follow}/></div>
+
                 {!rows.length && (
                   <div className="empty">
                     <Mator pose="searching"/>
-                    <h2>{busy ? "Loading messages…" : "No messages yet"}</h2>
-                    {!busy && !agentNames.length && (
+                    <h2>{busy ? "Loading messages…" : term ? "No matching messages" : requests ? "No requests awaiting a reply" : "No messages yet"}</h2>
+                    {!busy && !term && !requests && !agentNames.length && (
                       <button onClick={() => go("agents")}>
                         Add your first agent
                       </button>
                     )}
                   </div>
                 )}
+                {before && <button onClick={()=>browse(term,requests)}>Back to newest</button>}
                 {cursor && (
                   <button
                     disabled={busy}
-                    onClick={() => void task(() => load(true))}
+                    onClick={() => threadId ? void task(() => load(true)) : browse(term,requests,cursor)}
                   >
                     Load older messages
                   </button>
