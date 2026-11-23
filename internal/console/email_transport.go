@@ -38,11 +38,11 @@ var listenMailSocket = func(path string) (net.Listener, error) {
 
 func (s *server) startEmail(ctx context.Context) (func(), error) {
 	domain := strings.ToLower(os.Getenv("INBOX_EMAIL_DOMAIN"))
-	if domain == "" {
+	if domain == "" && os.Getenv("INBOX_EMAIL_SOCKET") == "" {
 		return func() {}, nil
 	}
 	socket, relay := os.Getenv("INBOX_EMAIL_SOCKET"), os.Getenv("INBOX_EMAIL_RELAY")
-	if !validDomain(domain) || !filepath.IsAbs(socket) {
+	if (domain != "" && !validDomain(domain)) || !filepath.IsAbs(socket) {
 		return nil, errors.New("email requires a DNS domain and absolute LMTP socket path")
 	}
 	senders := map[string]bool{}
@@ -163,7 +163,11 @@ func (s *server) lmtp(ctx context.Context, c net.Conn) {
 	greeted, started := false, false
 	var from, to string
 	c.SetDeadline(time.Now().Add(45 * time.Second))
-	if write("220 "+s.email.domain+" LMTP") != nil {
+	hello := s.email.domain
+	if hello == "" {
+		hello = "localhost"
+	}
+	if write("220 "+hello+" LMTP") != nil {
 		return
 	}
 	for {
@@ -178,7 +182,7 @@ func (s *server) lmtp(ctx context.Context, c net.Conn) {
 			greeted = true
 			started = false
 			to = ""
-			reply = "250-" + s.email.domain + "\r\n250-8BITMIME\r\n250-ENHANCEDSTATUSCODES\r\n250 SIZE 1048576"
+			reply = "250-" + hello + "\r\n250-8BITMIME\r\n250-ENHANCEDSTATUSCODES\r\n250 SIZE 1048576"
 		case "NOOP":
 			reply = "250 2.0.0 OK"
 		case "RSET":
@@ -487,6 +491,14 @@ func (s *server) recipientMap(ctx context.Context, c net.Conn) {
 		}
 		table, address, _ := strings.Cut(string(data[:n]), " ")
 		result := "NOTFOUND "
+		if table == "domains" {
+			ok, e := s.hosted(ctx, strings.ToLower(address))
+			if e != nil {
+				result = "TEMP domain lookup unavailable"
+			} else if ok {
+				result = "OK 1"
+			}
+		}
 		if table == "inboxes" {
 			_, e := s.emailBox(ctx, address)
 			switch {

@@ -5,7 +5,7 @@ Use the release installer on the computer where the agent runs. Pick `local` for
 ## Local
 
 ```sh
-installer=./openagentinbox-install-0.11.0.sh
+installer=./openagentinbox-install-0.12.0.sh
 bash "$installer" agent plan --target local
 bash "$installer" agent apply --target local
 bash "$installer" agent status --target local
@@ -18,7 +18,7 @@ Apply exits after the running daemon answers a database-backed health check. Rep
 Use an SSH config alias or `user@host`. Configure the host key and noninteractive SSH login on the controller. A non-root remote user needs noninteractive sudo for installation. Use an actual DNS name pointing to the VPS and make ports 80 and 443 reachable for managed HTTPS.
 
 ```sh
-installer=./openagentinbox-install-0.11.0.sh
+installer=./openagentinbox-install-0.12.0.sh
 bash "$installer" agent plan --target ssh --host inbox-prod --domain inbox.example.org
 bash "$installer" agent apply --target ssh --host inbox-prod --domain inbox.example.org
 bash "$installer" agent status --target ssh --host inbox-prod --domain inbox.example.org

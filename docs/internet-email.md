@@ -74,3 +74,35 @@ The send command prints a retry UUID. Reuse it for the same submission following
 * Four concurrent LMTP sessions, eight recipient lookup sessions, one relay worker, 1 MiB per inbound message, one outgoing attachment up to 96 KiB, and 120 new external sends per sending mailbox per rolling hour. The API request also fits within the existing 240,000-byte JSON limit. The inbox returns bounded text previews. HTML-only and unsupported MIME can be retrieved as original bytes. The worker parks on an in-process wake hint with a 30-second recovery scan.
 * Back up the live database with the application's online backup. It includes MIME originals, outbox rows and operator decisions. Monitor database/WAL bytes, backup restore time, edge queue age, disk free, oldest due outbox age, permanent refusals and uncertain attempts. SMTP spool and logs belong to the MTA. Capacity-plan original content per recipient. No automatic purge is enabled. Restoring an old snapshot requires reconciling queued sends against edge logs before enabling the relay again.
 * SMTPUTF8 addresses, IMAP, POP, public SMTP password submission, automatic complaint suppression and comprehensive MIME client rendering are outside this candidate. Agents submit through their authenticated Go API, CLI or MCP. Production acceptance requires a real public edge; see the Architect handoff in the release bundle.
+
+## First setup from the web desk (0.12.0)
+
+Sign in as the workspace owner and open **Mail setup**. If you already use a provider for personal or company email, choose a spare subdomain, for example agents.example.com. When asked for the IP, use the public address of the VPS that will run Postfix. If you host additional domains on that VPS, select the existing MX hostname in the advanced fields.
+
+On a fresh dedicated Debian or Ubuntu VPS, use the command shown in step 2. Read the bundled script before running it as root. It installs Postfix and OpenDKIM and restarts the services. It refuses to take over another installed MTA. On an existing server, use the manual instructions above. To support domains activated through the desk on a manually configured edge, use the same socketmap endpoint as virtual_mailbox_maps, with the table name **domains** for virtual_mailbox_domains. Preserve existing hosted domain maps. A domain supplied by the original INBOX_EMAIL_DOMAIN host setting continues to work. A new installation can supply INBOX_EMAIL_SOCKET and INBOX_EMAIL_RELAY without an environment domain.
+
+At the DNS provider, publish the ownership TXT and the A or AAAA record. The wizard displays the six records by name, type and value. Example: if the zone is example.com and the full record name is _openagentinbox.agents.example.com, enter _openagentinbox.agents in a provider that automatically appends example.com. Check DNS in the desk. Activate receiving after ownership passes and the local transport is online. Then publish MX, set priority 10 and copy the signing records. The helper makes the public DKIM value available in the wizard. Your DNS provider may cache the previous answer for its TTL. If more than one domain is active, the owner can choose the default domain for new outbound messages. Existing addresses on other active domains continue to receive.
+
+In the VPS provider's networking settings, permit incoming SMTP on TCP 25 and ask whether outgoing TCP 25 is permitted. Set the IP's reverse DNS to the MX hostname there. Configure a publicly trusted TLS certificate for that hostname on Postfix and ensure renewal reloads the service. For an outbound smarthost, use its SMTP/TLS credentials at Postfix and its prescribed SPF value. Never publish a second SPF record beside an existing one. A green DNS lookup shows what this resolver can see. Verify actual delivery and signatures by sending to and from an independent mailbox.
+
+Pick a seat in **Agent addresses and sending permissions** to see its address, add a delivery alias or grant outbound permission. Names are case-normalized and reserved across all local domains. Repeating an alias for the same mailbox is idempotent. Another mailbox's primary, alias, or pending enrollment produces a conflict. The same name on a second active domain reaches the same permanent mailbox. For legacy names unsuitable as email local parts, the public default is agent+MAILBOX_ID. Earlier send permissions set on the host remain defaults until overridden in the owner UI.
+
+## HTTP API
+
+Desk endpoints require the existing authenticated owner session. POST requests also require the matching Origin header. Agent bearer credentials are scoped to their own inbox. The setup endpoints never request a DNS provider password. They persist configuration in the mailbox SQLite backup.
+
+| Method and path | Input or result |
+| --- | --- |
+| GET /api/desk/email/setup | Domain drafts, activated domains, default domain, local receiving and relay configuration |
+| POST /api/desk/email/domains | JSON with domain and public ip, optional mx and selector. Saving edits preserves the ownership token. |
+| POST /api/desk/email/domains/DOMAIN/check | Empty object. Returns the DNS record names, types, expected values and observed checks. |
+| POST /api/desk/email/domains/DOMAIN/activate | Empty object. Rechecks ownership on the server and requires a connected local transport. |
+| POST /api/desk/email/domains/DOMAIN/primary | Empty object. Selects an active default address domain. |
+| GET /api/desk/email/addresses?box=NAME | Lists the primary name first, then aliases and the sending permission. |
+| POST /api/desk/email/aliases | JSON with box and alias (local name only). HTTP 409 identifies an ownership conflict. |
+| POST /api/desk/email/sender | JSON with box and enabled (true or false). |
+| GET /api/agent/inbox?folder=sent | Raw sent messages. The existing inbox endpoint defaults to incoming messages. |
+| GET /api/agent/threads?folder=inbox or folder=sent | Conversation summaries, newest activity in that folder first. count is the number of messages in that folder. |
+| GET /api/agent/threads/ROOT | Both directions of the conversation visible to the caller. Linked messages outside the mailbox are excluded. |
+
+Desk thread routes use /api/desk/threads and accept box=NAME. Continue any list with its returned next value as before. Listing a thread leaves opened receipts unchanged. Opening a message through read records the recipient's open. The thread URL is /inboxes/NAME/threads/ROOT. Direct replies share a thread even when the subject changes. An incoming Internet reply needs a recognized References or In-Reply-To value, scoped to the correspondent and mailbox. An unmatched reply starts a new conversation. Subject similarity never combines conversations. The migration indexes existing internal reply links and inspects up to 64 KiB of stored Internet headers per message once.

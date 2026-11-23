@@ -392,3 +392,5 @@ a.letter:hover{background:#faf6f0}
 .receipt-browser th:first-child{width:44%}.receipt-browser thead th{background:#f7f4ef}
 .receipt-browser td time,.receipt-pages{font-variant-numeric:tabular-nums}
 .receipt-pages{align-items:center}.receipt-pages span{margin-right:auto}
+
+.mail-setup{max-width:58rem}.mail-setup .card{margin:1.2rem 0;padding:1.3rem}.mail-setup form,.mail-setup label{display:grid;gap:.35rem}.mail-setup form{gap:.8rem}.mail-setup form button,.mail-setup button{width:fit-content}.mail-setup input[type=checkbox]{width:auto}.mail-setup p{max-width:70ch}.mail-setup code,.mail-setup pre{white-space:pre-wrap;overflow-wrap:anywhere}.dns-record{padding:1rem 0;border-top:1px solid #d5d9de}.dns-record label{margin:.5rem 0 .25rem}.mail-setup button{margin:.25rem .35rem .25rem 0}

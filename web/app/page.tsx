@@ -14,6 +14,7 @@ import {
   ArrowRight,
   Plus,
 } from "lucide-react";
+import {MailSetup} from "./mail-setup";
 import { Workspace, EnrollmentQueue, useWorkspace } from "./live";
 type Session = {
   name: string | null;
@@ -23,6 +24,7 @@ type Session = {
 };
 type Accounts = { operator: string; agents: string[]; email_domain?: string;operator_email_send?: boolean };
 type Row = {
+ thread?:string; count?:number;
   id: string;
   src: string;
   dst: string;
@@ -121,7 +123,8 @@ export default function Home() {
   const [shareSeat, setShareSeat] = useState("");
   const parts = path.split("/");
   const box = parts[1] === "inboxes" ? parts[2] : acc?.operator ?? "operator";
-  const folder = parts[1] === "activity" ? "activity" : parts[1] === "compose" ? "compose" : parts[1] === "agents" ? "agents" : parts[3] === "sent" ? "sent" : "inbox";
+  const threadId=parts[3]==="threads"?parts[4]:"";
+ const folder = parts[1]==="mail-setup"?"mail-setup":parts[1] === "activity" ? "activity" : parts[1] === "compose" ? "compose" : parts[1] === "agents" ? "agents" : parts[3] === "sent" ? "sent" : "inbox";
   const messageId = parts[1] === "messages" ? parts[2] : "";
   const     [rows, list] = useState<Row[]>([]),
     [cursor, next] = useState<string | null>(null);
@@ -185,7 +188,7 @@ export default function Home() {
       folder,
       ...(more && cursor ? { before: cursor } : {}),
     });
-    const data = await api("desk/list?" + q);
+    const data = await api("desk/threads"+(threadId?"/"+threadId:"")+"?" + q);
     if (gen === generation.current) {
       list((old) => (more ? [...old, ...data.rows] : data.rows));
       next(data.next);
@@ -200,24 +203,25 @@ export default function Home() {
     return () => {
       generation.current++;
     };
-  }, [folder, box, messageId, s?.name, acc]);
+  }, [folder, box, threadId,messageId, s?.name, acc]);
   useEffect(()=>{
     if(messageId||!newest||!s?.name||(folder!=="inbox"&&folder!=="sent"))return;
     const stamp=generation.current;
     const q=new URLSearchParams({box,folder});
     let cancelled=false;
-    void api("desk/list?"+q).then(data=>{
+    void api("desk/threads"+(threadId?"/"+threadId:"")+"?"+q).then(data=>{
       if(cancelled||stamp!==generation.current)return;
       list(old=>{
-        const seen=new Set(data.rows.map((r:Row)=>r.id));
+        const identity=(r:Row)=>threadId?r.id:r.thread??r.id;
+        const seen=new Set(data.rows.map(identity));
         // Keep older pages only if they overlap the freshly fetched first page.
-        if(old.some(r=>seen.has(r.id)))return [...data.rows,...old.filter(r=>!seen.has(r.id))];
+        if(old.some(r=>seen.has(identity(r))))return [...data.rows,...old.filter(r=>!seen.has(identity(r)))];
         return data.rows;
       });
       if(!cursor||!rows.some(r=>data.rows.some((v:Row)=>v.id===r.id)))next(data.next);
     }).catch(()=>{});
     return ()=>{cancelled=true};
-  },[newest,folder,box,messageId,s?.name]);
+  },[newest,folder,box,threadId,messageId,s?.name]);
   useEffect(() => {
     select(null);
     setShareSeat("");
@@ -243,7 +247,7 @@ export default function Home() {
     key(""); warn(""); say("");
   }
   function go(v: typeof folder, seat = box) {
-    navigate(v === "activity" || v === "compose" || v === "agents" ? "/" + v : "/inboxes/" + encodeURIComponent(seat) + (v === "sent" ? "/sent" : ""));
+    navigate(v==="mail-setup" || v === "activity" || v === "compose" || v === "agents" ? "/" + v : "/inboxes/" + encodeURIComponent(seat) + (v === "sent" ? "/sent" : ""));
   }
   function follow(e: React.MouseEvent<HTMLAnchorElement>) {
     if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey && e.button === 0) {
@@ -386,7 +390,7 @@ export default function Home() {
           Compose
         </button>
         <nav>
-          {(["inbox", "sent", "agents", "activity"] as const).map(
+          {(["inbox", "sent", "agents", "activity","mail-setup"] as const).map(
             (v) => (
               <button
                 key={v}
@@ -400,7 +404,7 @@ export default function Home() {
                 ) : (
                   v === "activity" ? <Activity /> : <Users />
                 )}
-                {v === "inbox" ? "Inbox" : v === "sent" ? "Sent" : v === "activity" ? "Activity" : "Agents"}
+                {v === "inbox" ? "Inbox" : v === "sent" ? "Sent" : v === "activity" ? "Activity" : v==="mail-setup"?"Mail setup":"Agents"}
               </button>
             ),
           )}
@@ -409,7 +413,7 @@ export default function Home() {
           <label>Find an inbox<input type="search" value={filter} placeholder="Search by name" onChange={e=>setFilter(e.target.value)} /></label>
           <div className="directory-list">
             {[acc.operator,...agentNames].filter(n=>n.toLowerCase().includes(filter.trim().toLowerCase())).map(n=>(
-              <a key={n} href={"/inboxes/"+encodeURIComponent(n)} onClick={follow} aria-current={box===n && !messageId && folder==="inbox" ? "page" : undefined}>{n}</a>
+              <a key={n} href={"/inboxes/"+encodeURIComponent(n)+(folder==="sent"?"/sent":"")} onClick={follow} aria-current={box===n && !messageId && folder==="inbox" ? "page" : undefined}>{n}</a>
             ))}
             {![acc.operator,...agentNames].some(n=>n.includes(filter.trim().toLowerCase())) && <span>No matching inboxes</span>}
           </div>
@@ -491,7 +495,7 @@ export default function Home() {
                 )}
               </article>
             </>
-          ) : folder === "activity" ? (
+          ) : folder==="mail-setup" ? <MailSetup boxes={[acc.operator,...agentNames]}/> : folder === "activity" ? (
             <Workspace data={live} connection={connection} review={()=>go("agents")} openBox={name=>go("inbox",name)}/>
           ) : folder === "compose" ? (
             <>
@@ -688,7 +692,7 @@ export default function Home() {
           ) : (
             <>
               <div className="heading">
-                <h1>{folder === "sent" ? "Sent" : "Inbox"}</h1>
+                <h1>{threadId?"Conversation":folder === "sent" ? "Sent" : "Inbox"}</h1>
                 <button
                   aria-label="Refresh messages"
                   disabled={busy}
@@ -698,17 +702,17 @@ export default function Home() {
                 </button>
               </div>
               <div className="card mailbox">
-                <div className="toolbar">
+                <div className="toolbar"><a href={"/inboxes/"+encodeURIComponent(box)} onClick={follow}>Inbox</a> <a href={"/inboxes/"+encodeURIComponent(box)+"/sent"} onClick={follow}>Sent</a>
                   <strong>
-                    {folder === "sent" ? "Sent by" : "Received by"}
+                    {threadId?"Messages for":folder === "sent" ? "Sent by" : "Received by"}
                   </strong>
                   <strong>{box}</strong>
                 </div>
                 {rows.map((r) => (
-                  <a className="letter" key={r.id} href={"/messages/"+encodeURIComponent(r.id)} onClick={follow}>
+                  <a className="letter" key={threadId?r.id:r.thread??r.id} href={threadId||!r.thread?"/messages/"+encodeURIComponent(r.id):"/inboxes/"+encodeURIComponent(box)+"/threads/"+encodeURIComponent(r.thread)} onClick={follow}>
                     <Mail size={18} />
                     <span>
-                      <strong>{r.subject}</strong>
+                      <strong>{r.subject||"(No subject)"}{!threadId&&r.count&&r.count>1?" · "+r.count+" in this folder":""}</strong>
                       <small>{folder === "sent" ? r.dst : r.src}</small>
                     </span>
                     <time>{new Date(r.at).toLocaleDateString()}</time>

@@ -315,6 +315,8 @@ func (s *Store) Sender(id string) (string, bool, error) {
 }
 
 type Message struct {
+	ThreadHint string // Derived by the transport; excluded from the submission digest.
+
 	ID, Sender, ConversationID, ParentID, Subject string
 	Intent                                        string
 	Priority                                      int
@@ -402,8 +404,12 @@ func (s *Store) acceptTx(ctx context.Context, tx *sql.Tx, opKey string, m Messag
 		return "", false, err
 	}
 	prev := previewPrefix(m.Body)
+	conversation := m.ConversationID
+	if conversation == "" {
+		conversation = m.ThreadHint
+	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO messages (seq,id, sender, conversation_id, parent_id, subject, priority, created_at, bytes, preview, body, final, created_text, display_body)
-	  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, sequence, m.ID, m.Sender, m.ConversationID, m.ParentID, m.Subject, m.Priority, now.UnixMilli(), len(m.Body), prev, m.Body, b2i(m.Final), now.UTC().Format(time.RFC3339Nano), DisplayBody(m.Body))
+	  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, sequence, m.ID, m.Sender, conversation, m.ParentID, m.Subject, m.Priority, now.UnixMilli(), len(m.Body), prev, m.Body, b2i(m.Final), now.UTC().Format(time.RFC3339Nano), DisplayBody(m.Body))
 	if err != nil {
 		return "", false, err
 	}

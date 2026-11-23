@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -24,7 +23,7 @@ import (
 )
 
 const maxLetter = 1 << 20
-const emailSchema = `
+const emailSchema = setupMailSchema + `
 CREATE TABLE IF NOT EXISTS email_decisions(id TEXT,attempt INTEGER,state TEXT,evidence TEXT,decided INTEGER,PRIMARY KEY(id,attempt));
 CREATE TABLE IF NOT EXISTS email_original(id TEXT PRIMARY KEY, envelope TEXT NOT NULL, wire_id TEXT NOT NULL, raw BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS email_files(id TEXT PRIMARY KEY,name TEXT NOT NULL,data BLOB NOT NULL);
@@ -70,7 +69,14 @@ type emailConfig struct {
 
 func (s *server) emailBox(ctx context.Context, address string) (string, error) {
 	local, domain, _ := strings.Cut(strings.ToLower(address), "@")
-	if !validEmail(address) || domain != s.email.domain {
+	if !validEmail(address) {
+		return "", sql.ErrNoRows
+	}
+	hosted, e := s.hosted(ctx, domain)
+	if e != nil {
+		return "", e
+	}
+	if !hosted {
 		return "", sql.ErrNoRows
 	}
 	if token, ok := strings.CutPrefix(local, "bounce+"); ok {
@@ -82,7 +88,11 @@ func (s *server) emailBox(ctx context.Context, address string) (string, error) {
 		return local, nil
 	}
 	var box string
-	err := s.store.Reader().QueryRowContext(ctx, "SELECT a.box FROM addresses a JOIN agents g ON g.name=a.box WHERE a.address=? AND g.key IS NOT NULL", local).Scan(&box)
+	if id, ok := strings.CutPrefix(local, "agent+"); ok {
+		err := s.store.Reader().QueryRowContext(ctx, "SELECT box FROM mailbox_ids JOIN agents ON name=box WHERE id=? AND key IS NOT NULL", id).Scan(&box)
+		return box, err
+	}
+	err := s.store.Reader().QueryRowContext(ctx, "SELECT a.box FROM addresses a LEFT JOIN agents g ON g.name=a.box WHERE a.address=? AND (g.key IS NOT NULL OR a.box=?)", local, s.operator).Scan(&box)
 	return box, err
 }
 
@@ -173,6 +183,15 @@ func (s *server) acceptLetter(ctx context.Context, envelope, rcpt string, raw []
 		key += "/" + bounce
 	}
 	m := deliverystore.Message{ID: uuid.NewString(), Sender: sender, Recipients: []string{box}, Subject: subject, Body: []byte(body), Priority: 1}
+	parent, e := mailParent(ctx, s.store.Reader(), msg.Header, box, sender, 1<<63-1)
+	if e != nil {
+		return "", e
+	}
+	if parent != 0 {
+		if e = s.store.Reader().QueryRowContext(ctx, "SELECT root FROM thread_members WHERE seq=?", parent).Scan(&m.ThreadHint); e != nil {
+			return "", e
+		}
+	}
 	id, err := s.store.AcceptMail(ctx, key, m, time.Now(), func(tx *sql.Tx) error {
 		if box != s.operator {
 			var active int
@@ -213,8 +232,16 @@ func (s *server) enqueueLetter(tx *sql.Tx, m deliverystore.Message, fileName str
 	} else if err := tx.QueryRow("SELECT address FROM addresses JOIN agents ON name=box WHERE box=? AND current=1 AND key IS NOT NULL", m.Sender).Scan(&addr); err != nil {
 		return err
 	}
-	if !validEmail(addr + "@" + s.email.domain) {
-		return errors.New("invalid public sender address")
+	domain := s.primaryDomain()
+	if domain == "" {
+		return failure{409, "Activate a mail domain first"}
+	}
+	if !validEmail(addr + "@" + domain) {
+		var id string
+		if err := tx.QueryRow("SELECT id FROM mailbox_ids WHERE box=?", m.Sender).Scan(&id); err != nil {
+			return err
+		}
+		addr = "agent+" + id
 	}
 	var recent int
 	if err := tx.QueryRow("SELECT count(*) FROM email_outbox WHERE box=? AND created>=?", m.Sender, time.Now().Add(-time.Hour).Unix()).Scan(&recent); err != nil {
@@ -223,7 +250,7 @@ func (s *server) enqueueLetter(tx *sql.Tx, m deliverystore.Message, fileName str
 	if recent >= 120 {
 		return failure{429, "External mail hourly limit reached"}
 	}
-	_, err := tx.Exec("INSERT INTO email_outbox(id,box,origin,bounce,destination,state,due,created) VALUES(?,?,?,?,?,'queued',0,?)", m.ID, m.Sender, addr+"@"+s.email.domain, strings.ReplaceAll(uuid.NewString(), "-", ""), m.Recipients[0], time.Now().Unix())
+	_, err := tx.Exec("INSERT INTO email_outbox(id,box,origin,bounce,destination,state,due,created) VALUES(?,?,?,?,?,'queued',0,?)", m.ID, m.Sender, addr+"@"+domain, strings.ReplaceAll(uuid.NewString(), "-", ""), m.Recipients[0], time.Now().Unix())
 	if err != nil {
 		return err
 	}

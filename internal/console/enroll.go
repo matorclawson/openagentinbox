@@ -67,6 +67,13 @@ func (s *server) enroll(_ http.ResponseWriter, r *http.Request) (any, error) {
 	if !errors.Is(e, sql.ErrNoRows) {
 		return nil, e
 	}
+	var reserved bool
+	if e = tx.QueryRow("SELECT EXISTS(SELECT 1 FROM addresses WHERE address=?)", q.Name).Scan(&reserved); e != nil {
+		return nil, e
+	}
+	if reserved {
+		return nil, failure{409, "This address is already assigned"}
+	}
 	if _, e = tx.Exec("DELETE FROM enrollments WHERE expires<=?", now()); e != nil {
 		return nil, e
 	}

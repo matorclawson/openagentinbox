@@ -23,9 +23,12 @@ func (s *server) mailboxIdentity(box string) (any, error) {
 	var id, name string
 	err := s.store.Reader().QueryRow("SELECT id,address FROM mailbox_ids JOIN addresses USING(box) WHERE box=? AND current=1", box).Scan(&id, &name)
 	result := object{"mailbox_id": id, "name": name, "original_address": box}
-	if err == nil && s.email != nil && validEmail(name+"@"+s.email.domain) {
-		result["email_address"] = name + "@" + s.email.domain
-		result["external_send_enabled"] = s.email.senders[box]
+	if domain := s.primaryDomain(); err == nil && domain != "" {
+		if !validEmail(name + "@" + domain) {
+			name = "agent+" + id
+		}
+		result["email_address"] = name + "@" + domain
+		result["external_send_enabled"] = s.maySend(box)
 	}
 	return result, err
 }

@@ -13,6 +13,7 @@ import (
 )
 
 func (s *server) mailRoutes(add func(string, handler)) {
+	s.setupRoutes(add)
 	add("GET /api/desk/email/uncertain", s.uncertainMail)
 	add("POST /api/desk/email/reconcile", s.reconcileEmail)
 	add("POST /api/desk/revoke-batch", s.revokeBatch)
@@ -22,6 +23,8 @@ func (s *server) mailRoutes(add func(string, handler)) {
 		add("POST /api/desk/"+v, s.credential)
 	}
 	for _, a := range []string{"desk", "agent"} {
+		add("GET /api/"+a+"/threads", s.threads)
+		add("GET /api/"+a+"/threads/{root}", s.threads)
 		add("POST /api/"+a+"/send", s.send)
 		add("GET /api/"+a+"/email-original/{id}", s.originalEmail)
 		add("GET /api/"+a+"/receipt/{id}", s.receipt)
@@ -60,8 +63,8 @@ func (s *server) accounts(_ http.ResponseWriter, r *http.Request) (any, error) {
 	}
 	result := object{"operator": s.operator, "agents": names}
 	if s.email != nil {
-		result["email_domain"] = s.email.domain
-		result["operator_email_send"] = s.email.senders[s.operator]
+		result["email_domain"] = s.primaryDomain()
+		result["operator_email_send"] = s.maySend(s.operator)
 	}
 	return result, nil
 }
@@ -141,7 +144,15 @@ func (s *server) send(_ http.ResponseWriter, r *http.Request) (any, error) {
 	q.Subject = strings.TrimSpace(q.Subject)
 	q.Body = strings.TrimSpace(q.Body)
 	external := strings.Contains(q.To, "@")
-	if external && s.email != nil && strings.HasSuffix(strings.ToLower(q.To), "@"+s.email.domain) && q.ReplyTo == "" {
+	localDomain := false
+	if external {
+		_, d, _ := strings.Cut(q.To, "@")
+		localDomain, e = s.hosted(r.Context(), strings.ToLower(d))
+		if e != nil {
+			return nil, e
+		}
+	}
+	if external && localDomain && q.ReplyTo == "" {
 		box, err := s.emailBox(r.Context(), q.To)
 		if err != nil {
 			return nil, err
@@ -156,10 +167,10 @@ func (s *server) send(_ http.ResponseWriter, r *http.Request) (any, error) {
 		if q.ReplyTo != "" {
 			q.To = strings.TrimPrefix(q.To, "external:")
 		}
-		if s.email == nil || !s.email.senders[src] {
+		if !s.maySend(src) {
 			return nil, failure{403, "External email sending is disabled for this mailbox"}
 		}
-		if !validEmail(q.To) || strings.HasSuffix(strings.ToLower(q.To), "@"+s.email.domain) || strings.ContainsAny(q.Subject, "\r\n\x00") || (q.Intent != "" && q.Intent != "fyi") {
+		if !validEmail(q.To) || localDomain || strings.ContainsAny(q.Subject, "\r\n\x00") || (q.Intent != "" && q.Intent != "fyi") {
 			return nil, failure{400, "Use an external address, single-line subject and FYI intent"}
 		}
 	}
@@ -235,7 +246,10 @@ func (s *server) list(_ http.ResponseWriter, r *http.Request) (any, error) {
 		return nil, e
 	}
 	q := r.URL.Query()
-	sent := false
+	sent := q.Get("folder") == "sent"
+	if v := q.Get("folder"); v != "" && v != "sent" && v != "inbox" {
+		return nil, failure{400, "Unknown folder"}
+	}
 	if strings.HasPrefix(r.URL.Path, "/api/desk/") {
 		if v := q.Get("box"); v != "" {
 			box = v
@@ -306,8 +320,8 @@ func (s *server) detail(_ http.ResponseWriter, r *http.Request) (any, error) {
 	query := `SELECT m.sender,d.seat,m.subject,m.body,m.created_text,coalesce(r.opened,0),coalesce(r.replied,0),coalesce(r.state,'fyi'),coalesce(r.due,0) FROM messages m JOIN deliveries d USING(seq) LEFT JOIN mail_receipts r ON r.id=m.id AND r.seat=d.seat WHERE m.id=?`
 	args := []any{id}
 	if strings.HasPrefix(r.URL.Path, "/api/agent/") {
-		query += " AND (d.seat=? OR EXISTS(SELECT 1 FROM message_readers WHERE id=m.id AND seat=?))"
-		args = append(args, actor, actor)
+		query += " AND (m.sender=? OR d.seat=? OR EXISTS(SELECT 1 FROM message_readers WHERE id=m.id AND seat=?))"
+		args = append(args, actor, actor, actor)
 	}
 	e = s.store.Reader().QueryRowContext(r.Context(), query, args...).Scan(&src, &dst, &sub, &body, &at, &opened, &replied, &state, &due)
 	if e != nil {

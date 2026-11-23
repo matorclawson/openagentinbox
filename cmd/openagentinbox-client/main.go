@@ -211,11 +211,11 @@ func watch(ctx context.Context, path string, p profile) error {
 	return nil
 }
 
-const usage = "openagentinbox-client [--seat NAME] whoami | authorization | onboard ORIGIN [--watch|--install-worker] | verify ORIGIN CURRENT_NAME [MAILBOX_ID] | use-name ORIGIN CURRENT_NAME MAILBOX_ID | bind ORIGIN --token-stdin | login ORIGIN | status ORIGIN | tickets ORIGIN DIRECTORY | join ORIGIN NAME [--ticket-stdin] | host-info ORIGIN | handshake ORIGIN DIRECTORY | inbox [BEFORE] | read ID | email-original ID | email-file TO SUBJECT BODY FILE [UUID] | send TO SUBJECT BODY [UUID] | request|urgent TO SUBJECT BODY [UUID] | reply ID TO SUBJECT BODY [UUID] | receipt ID | alerts | request-action accept|defer|resolve|decline ID [RFC3339] | watch | notify help"
+const usage = "openagentinbox-client [--seat NAME] whoami | authorization | onboard ORIGIN [--watch|--install-worker] | verify ORIGIN CURRENT_NAME [MAILBOX_ID] | use-name ORIGIN CURRENT_NAME MAILBOX_ID | bind ORIGIN --token-stdin | login ORIGIN | status ORIGIN | tickets ORIGIN DIRECTORY | join ORIGIN NAME [--ticket-stdin] | host-info ORIGIN | handshake ORIGIN DIRECTORY | inbox|sent [BEFORE] | threads inbox|sent [BEFORE] | thread ROOT [BEFORE] | read ID | email-original ID | email-file TO SUBJECT BODY FILE [UUID] | send TO SUBJECT BODY [UUID] | request|urgent TO SUBJECT BODY [UUID] | reply ID TO SUBJECT BODY [UUID] | receipt ID | alerts | request-action accept|defer|resolve|decline ID [RFC3339] | watch | notify help"
 
 func run(ctx context.Context, args []string) error {
 	if len(args) == 1 && args[0] == "version" {
-		fmt.Println("0.11.0")
+		fmt.Println("0.12.0")
 		return nil
 	}
 	if len(args) == 0 || args[0] == "help" {
@@ -442,10 +442,20 @@ func run(ctx context.Context, args []string) error {
 			route = "whoami"
 		case cmd == "watch" && len(a) == 0:
 			return watch(ctx, path, p)
-		case cmd == "inbox" && len(a) <= 1:
-			route = "inbox"
+		case (cmd == "sent" || cmd == "inbox") && len(a) <= 1:
+			route = "inbox?folder=" + cmd
 			if len(a) == 1 {
-				route += "?before=" + url.QueryEscape(a[0])
+				route += "&before=" + url.QueryEscape(a[0])
+			}
+		case cmd == "threads" && len(a) >= 1 && len(a) <= 2 && (a[0] == "inbox" || a[0] == "sent"):
+			route = "threads?folder=" + a[0]
+			if len(a) == 2 {
+				route += "&before=" + url.QueryEscape(a[1])
+			}
+		case cmd == "thread" && len(a) >= 1 && len(a) <= 2:
+			route = "threads/" + url.PathEscape(a[0])
+			if len(a) == 2 {
+				route += "?before=" + url.QueryEscape(a[1])
 			}
 		case cmd == "read" && len(a) == 1:
 			route = "message/" + url.PathEscape(a[0])
