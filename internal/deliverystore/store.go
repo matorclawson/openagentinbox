@@ -90,6 +90,13 @@ type Store struct {
 	readers        *sql.DB
 }
 
+// Writer returns the store-owned serialized connection for same-database extensions.
+// The Store owns its lifetime and pool configuration.
+func (s *Store) Writer() *sql.DB { return s.db }
+
+// Reader returns the bounded read pool used for committed snapshots.
+func (s *Store) Reader() *sql.DB { return s.readDB() }
+
 func (s *Store) readDB() *sql.DB {
 	if s.readers != nil {
 		return s.readers

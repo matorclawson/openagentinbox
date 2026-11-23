@@ -148,13 +148,7 @@ func Run() error {
 		return e
 	}
 	defer s.store.Close()
-	u := url.URL{Scheme: "file", Path: p, RawQuery: "_pragma=busy_timeout(5000)&_txlock=immediate"}
-	s.db, e = sql.Open("sqlite", u.String())
-	if e != nil {
-		return e
-	}
-	defer s.db.Close()
-	s.db.SetMaxOpenConns(1)
+	s.db = s.store.Writer()
 	if _, e = s.db.Exec(schema + liveSchema + pairSchema + addressSchema + onboardingSchema + trackingSchema); e != nil {
 		return e
 	}

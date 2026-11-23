@@ -107,7 +107,7 @@ func (s *server) actor(r *http.Request) (string, error) {
 	var n string
 	b := bearer(r)
 	if b != "" {
-		e := s.db.QueryRow("SELECT name FROM agents WHERE key=?", hash(b)).Scan(&n)
+		e := s.store.Reader().QueryRow("SELECT name FROM agents WHERE key=?", hash(b)).Scan(&n)
 		if e == nil {
 			return n, nil
 		}
@@ -134,7 +134,7 @@ func (s *server) send(_ http.ResponseWriter, r *http.Request) (any, error) {
 	}
 
 	if q.To != s.operator {
-		if e = s.db.QueryRow("SELECT box FROM addresses WHERE address=?", q.To).Scan(&q.To); e != nil {
+		if e = s.store.Reader().QueryRow("SELECT box FROM addresses WHERE address=?", q.To).Scan(&q.To); e != nil {
 			return nil, e
 		}
 	}
@@ -207,7 +207,7 @@ func (s *server) list(_ http.ResponseWriter, r *http.Request) (any, error) {
 	}
 
 	if box != s.operator && strings.HasPrefix(r.URL.Path, "/api/desk/") {
-		if e = s.db.QueryRow("SELECT box FROM addresses WHERE address=?", box).Scan(&box); e != nil {
+		if e = s.store.Reader().QueryRow("SELECT box FROM addresses WHERE address=?", box).Scan(&box); e != nil {
 			return nil, e
 		}
 	}
@@ -222,7 +222,7 @@ func (s *server) list(_ http.ResponseWriter, r *http.Request) (any, error) {
 	if sent {
 		query = "SELECT m.seq,m.id,m.sender,(SELECT group_concat(seat, ', ') FROM deliveries WHERE seq=m.seq),m.subject,m.created_text FROM messages m WHERE sender=? AND seq<? ORDER BY seq DESC LIMIT 41"
 	}
-	rs, e := s.db.QueryContext(r.Context(), query, box, before)
+	rs, e := s.store.Reader().QueryContext(r.Context(), query, box, before)
 	if e != nil {
 		return nil, e
 	}
@@ -263,7 +263,7 @@ func (s *server) detail(_ http.ResponseWriter, r *http.Request) (any, error) {
 		query += " AND (d.seat=? OR EXISTS(SELECT 1 FROM message_readers WHERE id=m.id AND seat=?))"
 		args = append(args, actor, actor)
 	}
-	e = s.db.QueryRowContext(r.Context(), query, args...).Scan(&src, &dst, &sub, &body, &at, &opened, &replied, &state, &due)
+	e = s.store.Reader().QueryRowContext(r.Context(), query, args...).Scan(&src, &dst, &sub, &body, &at, &opened, &replied, &state, &due)
 	if e != nil {
 		return nil, e
 	}

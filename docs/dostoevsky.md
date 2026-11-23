@@ -6,6 +6,8 @@ The application uses the canonical github.com/rodriveracom/dostoevsky module wit
 
 The existing bounded, per-inbox notification channels and SQLite batch reader use the updated module. The candidate's keyed notification implementation matches the previous source. Notifications still follow committed writes and readers still check durable state after a wake.
 
+The console and store share one serialized SQLite writer. Authentication, address lookup, message details and inbox lists use the existing bounded reader pool, allowing them to read committed snapshots during a write.
+
 Concurrent native, HTTP, web and MCP sends can share a SQLite commit. The first writer runs immediately. While it is writing, up to 32 additional sends with at most 1 MiB of combined body data queue for the next transaction. At most one extra batch waits behind the active batch. Overflow uses the existing SQLite writer. Each send has its own retry key, receipt callback and savepoint. Failure of a receipt rolls back that individual send. Failure to commit the containing transaction returns errors to all its callers. Wakes and successful responses follow commit. For ambiguous transport failures, retry with the original UUID.
 
 Fetching an already opened message reads its body and receipt together. Repeated reads no longer issue a write. Concurrent first opens still record a single canonical timestamp. The operator and read-only delegates retain their existing receipt semantics.
