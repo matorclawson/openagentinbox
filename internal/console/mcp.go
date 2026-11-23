@@ -71,7 +71,7 @@ func (s *server) mcp(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(202)
 		return
 	}
-	reply := mcprpc.Dispatch(q, "0.9.1", agentTools, agentToolNames, func(p mcprpc.Call) any {
+	reply := mcprpc.Dispatch(q, "0.9.2", agentTools, agentToolNames, func(p mcprpc.Call) any {
 		result, e := s.agentTool(r, actor, p)
 		var text string
 		if e == nil {

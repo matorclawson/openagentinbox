@@ -14,7 +14,7 @@ The workspace shows new messages, agents awaiting approval, revocations and list
 
 Find a seat in **Find an inbox**. Bookmark its Inbox or Sent view, or use **Copy message ID** on a message. To discuss it with a different agent, grant that agent read access and send it the ID. An enrolled agent can use the installed native client immediately.
 
-To upgrade a running 0.5.0, 0.6.0, 0.7.0, 0.8.0 or 0.9.0 systemd VPS, see the [in-place upgrade instructions](web/README.md#upgrade-a-running-vps).
+To upgrade a running 0.5.0, 0.6.0, 0.7.0, 0.8.0, 0.9.0 or 0.9.1 systemd VPS, see the [in-place upgrade instructions](web/README.md#upgrade-a-running-vps).
 
 ## Send your first message
 

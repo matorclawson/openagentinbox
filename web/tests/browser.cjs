@@ -31,9 +31,10 @@ const fs = require("fs"),
         "--single-process",
       ],
     });
-    const page = await browser.newPage({
+    const context = await browser.newContext({
       viewport: { width: 1200, height: 800 },
     });
+    const page = await context.newPage();
     page.setDefaultTimeout(10000);
     page.on("pageerror", console.error);
     await page.goto(url);
@@ -60,6 +61,38 @@ const fs = require("fs"),
     const onboard=child.spawnSync(native,["onboard",url],{env:{...process.env,HOME:dir},encoding:"utf8"});
     if(onboard.status!==0||JSON.parse(onboard.stdout).status!=="verified")throw Error("Native onboarding failed: "+onboard.stderr);
     await page.getByText(/CLI verified/).first().waitFor();
+    const snapshot = await page.evaluate(async () => (await fetch("/api/desk/live")).json());
+    const fleet = await page.context().newPage();
+    const receipts = Array.from({length:76}, (_, i) => [
+      "fleet-seat-" + String(i).padStart(2, "0"), "Mac-mini.local", "rodadmin",
+      Date.UTC(2026,10,23,4,45,40) + Math.floor(i*10/75)*1000, 0, "", "paired-mac"
+    ]);
+    await fleet.route("**/api/desk/live?**", route => route.fulfill({json:{...snapshot,onboarding:receipts}}));
+    await fleet.goto(url+"/agents");
+    const card = fleet.getByRole("region",{name:"Onboarding status"});
+    await card.getByRole("heading",{name:"76 of 76 CLI verified"}).waitFor();
+    await card.getByText("Mac-mini.local · Authorized by rodadmin",{exact:true}).waitFor();
+    if(await card.getByRole("table").count()) throw Error("Healthy receipts must start collapsed");
+    await card.getByRole("button",{name:"Browse receipts"}).click();
+    if(await card.locator("tbody tr").count()!==10) throw Error("Incorrect receipt page size");
+    await card.getByRole("button",{name:"Next"}).click();
+    await card.getByRole("rowheader",{name:"fleet-seat-10"}).waitFor();
+    await card.getByLabel("Find a seat").fill("seat-75");
+    await card.getByRole("rowheader",{name:"fleet-seat-75"}).waitFor();
+    if(await card.locator("time").getAttribute("datetime")!=="2026-11-23T04:45:50.000Z") throw Error("Wrong receipt timestamp");
+    await fleet.setViewportSize({width:390,height:844});
+    receipts[0][3]=0;
+    receipts[1][3]=0; receipts[1][4]=Date.now()+600000; receipts[1][5]="profile-conflict";
+    receipts[2][3]=0; receipts[2][4]=Date.now()+600000;
+    await fleet.reload();
+    await card.getByRole("heading",{name:"73 of 76 CLI verified"}).waitFor();
+    await card.getByText("Authorization expired",{exact:true}).waitFor();
+    await card.getByText("Profile conflict",{exact:true}).waitFor();
+    if(await card.locator("tbody tr").count()!==2) throw Error("Expected attention filter");
+    if(await card.evaluate(el=>el.getBoundingClientRect().right>innerWidth || el.scrollWidth>el.clientWidth+1)) throw Error("Mobile receipts overflow");
+    await card.getByRole("combobox").selectOption("waiting");
+    await card.getByRole("rowheader",{name:"fleet-seat-02"}).waitFor();
+    await fleet.close();
     await page.getByRole("button",{name:"Revoke CLI"}).click();
     await page.getByText("CLI revoked.",{exact:true}).waitFor();
     const status=child.spawnSync(native,["status",url],{env:{...process.env,HOME:dir},encoding:"utf8"});

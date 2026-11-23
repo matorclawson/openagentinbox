@@ -1,4 +1,5 @@
 "use client";
+import {OnboardingStatus,type Receipt} from "./onboarding-status";
 import { useEffect, useState } from "react";
 import { Activity, ArrowUpRight, Mail, Radio, UserRoundPlus, Users } from "lucide-react";
 
@@ -10,7 +11,7 @@ export type Live = {
   agents: [string,number,string][];
   activity: [string,string,number][];
   mail: [string,string,string,string,string][];
-  onboarding: [string,string,string,number,number,string][];
+  onboarding: Receipt[];
   clients: [string,string,number,number,number][];
   roster: [string,number,number,string,string][];
 };
@@ -65,7 +66,7 @@ export function EnrollmentQueue({data}:{data:Live}){
  const [review,setReview]=useState<Live["pending"]|null>(null),[msg,setMsg]=useState(""),[busy,setBusy]=useState(false);
  async function action(fn:()=>Promise<void>){setBusy(true);setMsg("");try{await fn()}catch(e){setMsg((e as Error).message)}finally{setBusy(false)}}
  const queue=review??data.pending;
- return <div className="queue"><section className="card detail">
+ return <div className="queue">{data.onboarding?.length>0&&<OnboardingStatus rows={data.onboarding}/>}<section className="card detail">
  <h2>Enrollment queue <small>{queue.length}</small></h2>
  <p>Match the names and codes with the requests from your agents.</p>
  {queue.length>0&&<ul className="requests">{queue.map(([n,c,expires,peer])=><li key={c}><strong>{n}</strong><small>{peer}</small><code>{c}</code>{!review&&<button onClick={()=>setReview([[n,c,expires,peer]])}>Review</button>}</li>)}</ul>}
@@ -105,7 +106,6 @@ function ClientPairing({data}:{data:Live}){
  <button onClick={()=>void act(async()=>{await navigator.clipboard.writeText(pair.code);setMessage("Token copied.")})}>Copy token</button>
  <small>Single use · expires at {new Date(pair.expires).toLocaleTimeString()}</small></div>}
  {target&&<p>Authorize this paired host to enroll missing inboxes and verify existing seat profiles. Start its worker once under the account that owns those profiles: <code>openagentinbox-client onboard {window.location.origin} --install-worker</code></p>}
- {data.onboarding?.length>0&&<details className="card detail" open><summary>Onboarding status</summary>{data.onboarding.map(([name,host,owner,at,expires,problem],i)=><div key={i}><strong>{name}</strong> · {host} · authorized by {owner} · {at?"CLI verified "+new Date(at).toLocaleString():expires<=Date.now()?"Authorization expired":problem||"Awaiting host"}</div>)}</details>}
  {data.clients.map(([id,label,expires,at,remaining])=><div className="agentrow" key={id}><strong>{at?label:"Awaiting CLI login"}</strong><small>{at?"Paired · "+id.slice(-6)+" · "+remaining+" unclaimed":"Expires "+new Date(expires).toLocaleTimeString()}</small><button disabled={busy} onClick={()=>void act(async()=>{await post("pair/revoke",{id});if(pair?.id===id)setPair(null);if(target===id)setTarget("");setMessage(at?"CLI revoked.":"Pairing canceled.")})}>{at?"Revoke CLI":"Cancel pairing"}</button></div>)}
  {message&&<p role="status">{message}</p>}<a href="/host-guide.md">Install the CLI and onboard a fleet</a>
  </section>

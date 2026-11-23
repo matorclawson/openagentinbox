@@ -173,7 +173,7 @@ func (s *server) workspace(_ http.ResponseWriter, r *http.Request) (any, error) 
 	data := object{"cursor": cursor, "peerLimit": s.peerLimit, "watching": s.live.watchers()}
 	// Array-valued queries keep the wire format stable for an empty workspace.
 	for key, query := range map[string]string{
-		"onboarding": "SELECT o.name,c.label,o.owner,o.verified,o.expires,o.problem FROM onboarding o JOIN paired_cli c ON c.id=o.host ORDER BY o.issued DESC,o.name LIMIT 512",
+		"onboarding": "SELECT o.name,c.label,o.owner,o.verified,o.expires,o.problem,o.host FROM onboarding o JOIN paired_cli c ON c.id=o.host ORDER BY o.issued DESC,o.name LIMIT 512",
 		"clients":    "SELECT id,label,deadline,coalesce(paired_at,0),(SELECT count(*) FROM roster WHERE host=paired_cli.id AND expires>?1) FROM paired_cli WHERE paired_at IS NOT NULL OR deadline>?1 ORDER BY rowid DESC",
 		"pending":    "SELECT name,code,expires,peer FROM enrollments WHERE expires>?1 ORDER BY expires,code",
 		"agents":     "SELECT address,key IS NOT NULL,box FROM agents JOIN addresses ON box=name AND current=1 ORDER BY address",

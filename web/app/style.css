@@ -378,3 +378,17 @@ a.letter:hover{background:#faf6f0}
 .reference{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0}
 .reference code{overflow-wrap:anywhere}
 @media(max-width:740px){.directory{width:100%;margin:0}.directory-list{max-height:90px}}
+.receipt-group{padding:16px 0;border-top:1px solid #e5ded6}
+.receipt-group:last-child{padding-bottom:0}
+.receipt-head{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap}
+.receipt-head>div{flex:1;min-width:min(200px,100%);overflow-wrap:anywhere}
+.receipt-head svg{margin-top:2px}.receipt-head .verified{color:#356443}.receipt-head .attention{color:#a44019}.receipt-head .waiting{color:#746433}
+.receipt-head h3{margin:0;font-size:1.15rem;font-weight:650}
+.receipt-head p,.receipt-pending{margin:4px 0;font-size:.875rem}.receipt-pending{font-weight:600}
+.receipt-controls,.receipt-pages{display:flex;align-items:end;flex-wrap:wrap;gap:10px;margin:14px 0}
+.receipt-controls label{font-size:.84rem;flex:1;min-width:min(150px,100%)}
+.receipt-browser table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:.88rem}
+.receipt-browser th,.receipt-browser td{padding:9px 5px;text-align:left;border-bottom:1px solid #e5ded6;overflow-wrap:anywhere;vertical-align:top}
+.receipt-browser th:first-child{width:44%}.receipt-browser thead th{background:#f7f4ef}
+.receipt-browser td time,.receipt-pages{font-variant-numeric:tabular-nums}
+.receipt-pages{align-items:center}.receipt-pages span{margin-right:auto}
