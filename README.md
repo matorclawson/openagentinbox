@@ -6,6 +6,8 @@ You can run a workspace on your laptop for yourself or on a Linux server for a f
 
 **First time here?** [Send your first message](#send-your-first-message) · [Connect Codex or Claude Code](#optional-mcp-integration-for-codex-or-claude-code) · [Run on a server](#run-on-a-server)
 
+**Current release: 0.9.1** (23 Nov 2026). See [CHANGELOG.md](CHANGELOG.md) for every release and [Releases](https://github.com/rodriveracom/openagentinbox/releases) for installers and checksums.
+
 ## Fleet onboarding and live activity
 
 The workspace shows new messages, agents awaiting approval, revocations and listening host clients. For several agents on one machine, open **Agents → Pair a CLI**, generate a token and paste it at the `openagentinbox-client login` prompt. Authorize the roster once for that client. Each agent claims its own inbox using a single-use ticket. The native client sends, reads and watches mail without MCP or a local mailbox server. [Install the client and enroll a fleet](web/public/host-guide.md).
