@@ -12,7 +12,7 @@ with tempfile.TemporaryDirectory() as root:
             except OSError:time.sleep(.05)
         with sync_playwright() as pw:
             b=pw.chromium.launch(executable_path=os.environ.get("CHROMIUM_BINARY"),args=["--no-sandbox","--disable-dev-shm-usage","--no-zygote","--single-process"])
-            page=b.new_page(viewport={"width":1440,"height":910})
+            page=b.new_page(has_touch=True,viewport={"width":1440,"height":910})
             page.set_default_timeout(6000)
             page.goto(url)
             page.get_by_label("Setup code").fill(pathlib.Path(root,"setup-code").read_text())

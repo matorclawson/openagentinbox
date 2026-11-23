@@ -734,12 +734,12 @@ export default function Home() {
               <div className="mail-panel">
                 <MailTools thread={!!threadId} query={term} requests={requests} sent={folder==="sent"} compact={compact} toggle={toggleDensity} apply={browse}/>
                 {threadId && <ThreadTime scale={zoom} start={Number(start)} counts={buckets} choose={chooseTime}/>}
-                {threadId && <nav className="thread-nav" aria-label="Messages in this window">
-                  <span>{term?"Search results":zoom?"Messages in this period":"All messages"}</span>
+                {threadId && (cursor||threadInfo.newer) && <nav className="thread-nav" aria-label="Messages in this window">
+                  <span>{term?"Search results":zoom?"Newest first":"All messages"}</span>
                   <span className="thread-steps"><button disabled={!cursor||busy} onClick={()=>browse(term,false,cursor!)}>← Older</button>
                   <button disabled={!threadInfo.newer||busy} onClick={()=>browse(term,false,threadInfo.newer,"after")}>Newer →</button></span>
                 </nav>}
-                {(threadId||term||requests||before) && <div className="results-line" role="status">{term?"Matches for “"+term+"”":requests?"Open requests":threadId?"Newest first":"Older conversations"} · {rows.length} on this page</div>}
+                {!zoom && (threadId||term||requests||before) && <div className="results-line" role="status">{term?"Matches for “"+term+"”":requests?"Open requests":threadId?"Newest first":"Older conversations"} · {rows.length} on this page</div>}
                 <div className={!threadId&&compact?"compact-list":""}>
                 <MailList key={path} rows={rows} box={box} sent={folder==="sent"} timeline={!!threadId} query={term} anchor={anchor} now={now} follow={follow}/></div>
 
