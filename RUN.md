@@ -10,19 +10,19 @@ tree, venue, tool versions and original output in each receipt.
 
 Plain `make verify` selects the applicable command on the approved host.
 The full gate requires both receipts. The Architect runs ENG-UK jobs.
-Use the assigned toolchains under `/opt/zeo/runtimes` on ENG-UK. Set
-`PLAYWRIGHT_MODULE` to the absolute path of the admitted Playwright or
-Playwright Core module on that host and record its version in the receipt.
-The gate checks that the module loads before building. It uses the installed
-Google Chrome, with no browser download.
+Use the assigned toolchains under `/opt/zeo/runtimes` on ENG-UK.
 
 ```sh
-PLAYWRIGHT_MODULE=/absolute/path/to/node_modules/playwright \
-  CHROME_PATH='/Applications/Google Chrome.app' make verify-web
+CHROME_PATH='/Applications/Google Chrome.app' make verify-web
 ```
 
-`CHROME_PATH` defaults to `/Applications/Google Chrome.app`. The gate sets
-`INBOX_DAEMON` to the daemon built from the checked-out source.
+`CHROME_PATH` defaults to `/Applications/Google Chrome.app`.
+`npm ci` installs Playwright Core at the version and integrity in the lockfile.
+The browser journey uses the installed Chrome and the daemon and client built
+from this checkout. It starts the daemon with private fixture state on a fresh
+loopback port and checks the instance in its health response before opening Chrome.
+The HTTP tests receive the built daemon path through `INBOX_DAEMON`.
+
 If the browser journey fails after opening a page, retain
 `build/browser-failure.png` alongside the run log. Set
 `INBOX_BROWSER_FAILURE_SCREENSHOT` to direct it to a different path.

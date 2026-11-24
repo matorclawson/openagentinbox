@@ -1,5 +1,5 @@
 CHROME_PATH ?= /Applications/Google Chrome.app
-export CHROME_PATH PLAYWRIGHT_MODULE
+export CHROME_PATH
 
 .PHONY: verify verify-go verify-web check-go-venue check-web-venue
 
@@ -25,12 +25,6 @@ check-web-venue:
 	esac
 	@if [ -d "$$CHROME_PATH" ]; then chrome="$$CHROME_PATH/Contents/MacOS/Google Chrome"; else chrome="$$CHROME_PATH"; fi; \
 	  test -f "$$chrome" && test -x "$$chrome" || { echo 'Set CHROME_PATH to Google Chrome.app or its executable.' >&2; exit 2; }
-	@case "$$PLAYWRIGHT_MODULE" in /*) ;; *) \
-	  echo 'Set PLAYWRIGHT_MODULE to the absolute path of the admitted Playwright module on ENG-UK. See RUN.md.' >&2; exit 2 ;; \
-	esac
-	@cd web && node -e "if (typeof require(process.env.PLAYWRIGHT_MODULE).chromium?.launch !== 'function') process.exit(2)" || { \
-	  echo 'Could not load Playwright from PLAYWRIGHT_MODULE. See RUN.md.' >&2; exit 2; \
-	}
 
 verify-go: check-go-venue
 	go build ./...
@@ -44,6 +38,8 @@ verify-web: check-web-venue
 	mkdir -p build
 	go build -o build/openagentinboxd ./cmd/openagentinboxd
 	bash scripts/build-clients.sh dist/ui
-	cd web && npm ci && npm run build && npm run typecheck
+	cd web && npm ci --include=dev && npm run build && npm run typecheck
 	cd web && INBOX_DAEMON="$(CURDIR)/build/openagentinboxd" npm test
-	cd web && INBOX_DAEMON="$(CURDIR)/build/openagentinboxd" node tests/browser.cjs
+	cd web && env -i PATH="$$PATH" CHROME_PATH="$$CHROME_PATH" \
+	  INBOX_BROWSER_FAILURE_SCREENSHOT="$$INBOX_BROWSER_FAILURE_SCREENSHOT" \
+	  node tests/browser.cjs "$(CURDIR)/build/openagentinboxd"
