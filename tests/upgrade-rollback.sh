@@ -242,7 +242,7 @@ forced_failure(){
     grep -Eq '^private check ok port=[0-9]+ data=/var/lib/openagentinbox$' /var/lib/openagentinbox/test-private-check.log || die "late: the private check was not isolated: $(cat /var/lib/openagentinbox/test-private-check.log 2>/dev/null || echo 'no log')"
     ! grep -Fq 'port=4310' /var/lib/openagentinbox/test-private-check.log || die 'late: the private check listened on 4310'
   fi
-  failed_dir=$(ls -d /var/lib/openagentinbox/failed-upgrade-* | sort | tail -n 1)
+  failed_dir=$(ls -d /var/lib/openagentinbox/failed-upgrade-* | sort | tail -n 1)/attempt.0
   [[ -e $failed_dir/console.sqlite ]] || die "$mode: $failed_dir holds no store"
   # Proof that migration really happened: the failed store's schema differs from the
   # previous release's. If it does not, PREVIOUS already has the candidate's schema.
