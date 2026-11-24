@@ -72,15 +72,40 @@ cleanup
 pid=''
 trap - EXIT
 activate(){ ln -s "$1" "$base/active.next.$$"; mv -Tf "$base/active.next.$$" "$base/active"; }
+# The candidate migrates the store on its first start. Keep a consistent copy so a
+# failed start can be undone together with the binary. The old service is stopped
+# first, so no message accepted before the stop is missing from the copy and none
+# can arrive between the copy and the switch.
+data=/var/lib/openagentinbox
+db=$data/console.sqlite
+snaps=$data/upgrade-snapshots
+[[ -f $db ]] || { echo "No store at $db. Current server is still serving." >&2; exit 1; }
+used=$(( $(stat -c %s "$db") + $(stat -c %s "$db-wal" 2>/dev/null || echo 0) ))
+avail=$(df --output=avail -B1 "$data" | tail -n 1)
+(( avail > 2 * used )) || { echo 'Not enough free disk space for a pre-upgrade copy. Current server is still serving.' >&2; exit 1; }
+install -d -m 0700 -o openagentinbox -g openagentinbox "$snaps"
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+snap="$snaps/pre-$before-to-$version-$stamp.sqlite"
+systemctl stop "$service"
+if ! runuser -u openagentinbox -- "$release/openagentinboxd" snapshot "$db" "$snap" >/dev/null; then
+  systemctl start "$service" || true
+  echo 'Could not take the pre-upgrade copy. The store is unchanged; restarted the previous release.' >&2
+  exit 1
+fi
 activate "$release"
-if systemctl restart "$service" && wait_health "$health" '"version":"0.12.11"'; then
-  echo "Serving $version. Previous release retained at $previous."
+if systemctl start "$service" && wait_health "$health" '"version":"0.12.11"'; then
+  echo "Serving $version. Previous release retained at $previous. Pre-upgrade copy: $snap"
 else
+  systemctl stop "$service" || true
+  failed="$data/failed-upgrade-$stamp"
+  install -d -m 0700 -o openagentinbox -g openagentinbox "$failed"
+  for f in "$db" "$db-wal" "$db-shm"; do [[ ! -e $f ]] || mv -f "$f" "$failed/"; done
+  install -m 0600 -o openagentinbox -g openagentinbox "$snap" "$db"
   activate "$previous"
-  if systemctl restart "$service" && wait_health "$health" "\"version\":\"$before\""; then
-    echo 'Upgrade failed. Restored the previous running release.' >&2
+  if systemctl start "$service" && wait_health "$health" "\"version\":\"$before\""; then
+    echo "Upgrade failed. Restored the previous running release and its data from $snap. The failed store is kept in $failed." >&2
   else
-    echo 'Rollback readiness failed. Inspect journalctl -u openagentinbox.' >&2
+    echo "Rollback readiness failed. The pre-upgrade copy is $snap and the failed store is in $failed. Inspect journalctl -u openagentinbox." >&2
   fi
   exit 1
 fi
