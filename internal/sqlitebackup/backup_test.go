@@ -74,3 +74,44 @@ func TestSnapshotRefusesAnExistingFileAndAnOpenDirectory(t *testing.T) {
 		t.Fatal("snapshot replaced an existing file")
 	}
 }
+
+func TestDigestIgnoresLayoutAndSeesAnyChange(t *testing.T) {
+	dir := t.TempDir()
+	src := legacyStore(t, dir)
+	ctx := context.Background()
+	first, err := Digest(ctx, src)
+	if err != nil || len(first) != 64 {
+		t.Fatal(first, err)
+	}
+	out := filepath.Join(dir, "snaps")
+	if err = os.Mkdir(out, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = Snapshot(ctx, src, filepath.Join(out, "copy.db")); err != nil {
+		t.Fatal(err)
+	}
+	if again, err := Digest(ctx, filepath.Join(out, "copy.db")); err != nil || again != first {
+		t.Fatal("a copy with the same rows has a different digest", again, err)
+	}
+	db, err := sql.Open("sqlite", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err = db.Exec(`INSERT INTO letters(body) VALUES('c')`); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := Digest(ctx, src); err != nil || changed == first {
+		t.Fatal("an added row did not change the digest", changed, err)
+	}
+	if _, err = db.Exec(`UPDATE letters SET body='z' WHERE body='c'`); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := Digest(ctx, src)
+	if _, err = db.Exec(`UPDATE letters SET body='c' WHERE body='z'`); err != nil {
+		t.Fatal(err)
+	}
+	if back, _ := Digest(ctx, src); back == after {
+		t.Fatal("an edited row did not change the digest")
+	}
+}

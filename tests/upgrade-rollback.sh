@@ -11,7 +11,8 @@
 #   late:     the candidate passes its private-port check, then fails as the service
 #             before its public listener opens;
 #   accepted: the candidate's public listener accepts a write, then it fails. The
-#             installer must not restore the copy; it keeps it and says so.
+#             installer must not restore the copy; it keeps it and says so;
+#   unobserved: the same, with no public listener the installer could ever see.
 # It also exercises the installer's stop proof and its restore step directly.
 # After each failure the previous release must serve again from its pre-upgrade
 # store copy. The last step upgrades with the unmodified candidate.
@@ -109,7 +110,7 @@ case $mode in
     # exists whenever the installer's readiness probe succeeds: the port, the data directory
     # and whether any mail setting reached the check. Then behave as the real candidate.
     log=/var/lib/openagentinbox/test-private-check.log
-    if [[ -n \${INBOX_ESCALATION_MAILBOX:-}\${INBOX_EMAIL_SOCKET:-}\${INBOX_EMAIL_DOMAIN:-} ]]; then echo 'mail settings reached the check' > \$log
+    if [[ -n \${INBOX_ESCALATION_MAILBOX:-}\${INBOX_EMAIL_SOCKET:-}\${INBOX_EMAIL_DOMAIN:-}\${INBOX_EMAIL_RELAY:-}\${INBOX_EMAIL_SENDERS:-} ]]; then echo 'mail settings reached the check' > \$log
     else echo "private check ok port=\$port data=\${INBOX_DATA:-}" > \$log; fi
     exec \$real "\$@";;
   accepted)
@@ -131,6 +132,21 @@ case $mode in
     sleep 2
     kill -9 \$child \$front 2>/dev/null; wait \$child \$front 2>/dev/null
     echo 'forced failure accepted: failed after a write was accepted and the public port was open' >&2
+    exit 1;;
+  unobserved)
+    if [[ \$port != 4310 ]]; then exec \$real "\$@"; fi
+    # Public phase, with no public listener the installer could ever observe: the candidate
+    # runs on 4311, accepts one real write, and dies at once. Only the store shows the write.
+    INBOX_PORT=4311 \$real "\$@" &
+    child=\$!
+    for ((i=0;i<240;i++)); do
+      curl -fsS --max-time 1 "http://127.0.0.1:4311/api/health" 2>/dev/null | grep -Fq '"version"' && break
+      sleep 0.5
+    done
+    code=\$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' -X POST -H 'Origin: $origin' -H 'content-type: application/json' --data '{"username":"owner","password":"$password"}' http://127.0.0.1:4311/api/login)
+    echo "accepted-write http=\$code" > /var/lib/openagentinbox/test-accepted-write.log
+    kill -9 \$child 2>/dev/null; wait \$child 2>/dev/null
+    echo 'forced failure unobserved: failed after a write was accepted on a port the installer never sees' >&2
     exit 1;;
   migrated)
     if [[ \$port == 4310 ]]; then exec \$real "\$@"; fi
@@ -169,23 +185,33 @@ direct_checks(){
   systemctl is-active --quiet $u || die 'direct: test unit did not start'
   confirm_stopped $u || die 'direct: confirm_stopped did not confirm a stopped unit'
   [[ $(systemctl show -p MainPID --value $u) == 0 ]] || die 'direct: the unit still has a main process'
-  echo 'direct: restore keeps every failed-store archive and is idempotent' >&2
+  echo 'direct: restore keeps every failed store whole and is idempotent' >&2
   eval "$(installer_fn restore_store)"
   rm -rf "$d"; install -d -m 0700 -o openagentinbox -g openagentinbox "$d" "$d/failed"
-  printf 'FAILED-ONE' > "$d/console.sqlite"; printf 'WAL-ONE' > "$d/console.sqlite-wal"
+  printf 'FAILED-ONE' > "$d/console.sqlite"; printf 'WAL-ONE' > "$d/console.sqlite-wal"; printf 'SHM-ONE' > "$d/console.sqlite-shm"
   printf 'COPY' > "$d/snap.sqlite"
   a=$(sha256sum < "$d/snap.sqlite" | cut -d' ' -f1)
+  # An interruption after the sidecars moved but before the replacement, then a retry: the
+  # retry joins the same archive and the sidecars never split from their main file.
+  archive_failed_store "$d/console.sqlite" "$d/failed"
   restore_store "$d/console.sqlite" "$d/failed" "$d/snap.sqlite" "$a" "$d/.restore"
   [[ $(cat "$d/console.sqlite") == COPY ]] || die 'direct: the copy was not restored'
-  [[ $(cat "$d/failed/console.sqlite") == FAILED-ONE && $(cat "$d/failed/console.sqlite-wal") == WAL-ONE ]] || die 'direct: the failed store was not archived'
+  [[ $(count_matches "$d/failed/attempt.*") == 1 ]] || die 'direct: a retry split the failed store across archives'
+  [[ $(cat "$d/failed/attempt.0/console.sqlite") == FAILED-ONE && $(cat "$d/failed/attempt.0/console.sqlite-wal") == WAL-ONE && $(cat "$d/failed/attempt.0/console.sqlite-shm") == SHM-ONE ]] || die 'direct: the failed store lost a file'
+  [[ ! -e $d/console.sqlite-wal && ! -e $d/console.sqlite-shm ]] || die 'direct: a candidate sidecar was left beside the restored store'
   # A retry after the replacement finished changes nothing and archives nothing.
   restore_store "$d/console.sqlite" "$d/failed" "$d/snap.sqlite" "$a" "$d/.restore"
-  [[ $(count_matches "$d/failed/console.sqlite*") == 2 ]] || die 'direct: a completed restore was archived again'
-  # A retry after an interruption before the replacement keeps the first archive.
+  [[ $(count_matches "$d/failed/attempt.*") == 1 ]] || die 'direct: a completed restore was archived again'
+  # A candidate sidecar beside a main file that already matches the copy is archived, not replayed.
+  printf 'STRAY' > "$d/console.sqlite-wal"
+  restore_store "$d/console.sqlite" "$d/failed" "$d/snap.sqlite" "$a" "$d/.restore"
+  [[ ! -e $d/console.sqlite-wal ]] || die 'direct: a stray sidecar stayed beside the restored store'
+  [[ $(cat "$d/failed/attempt.1/console.sqlite-wal") == STRAY ]] || die 'direct: the stray sidecar was not archived'
+  [[ $(cat "$d/failed/attempt.0/console.sqlite") == FAILED-ONE ]] || die 'direct: the first archive changed'
+  # A different failed store, after a restore: a new archive, the first untouched.
   printf 'FAILED-TWO' > "$d/console.sqlite"
   restore_store "$d/console.sqlite" "$d/failed" "$d/snap.sqlite" "$a" "$d/.restore"
-  [[ $(cat "$d/failed/console.sqlite") == FAILED-ONE ]] || die 'direct: a retry overwrote the first failed-store archive'
-  [[ $(cat "$d/failed/console.sqlite.1") == FAILED-TWO ]] || die 'direct: the retried archive has no unique name'
+  [[ $(cat "$d/failed/attempt.2/console.sqlite") == FAILED-TWO && $(cat "$d/failed/attempt.0/console.sqlite") == FAILED-ONE ]] || die 'direct: a second failed store overwrote or merged an archive'
   rm -rf "$d"
 }
 
@@ -252,21 +278,22 @@ refused_early(){
 # keep the active store and the copy, restore nothing, and say so. Then recover by hand
 # from the kept copy, which also proves the copy is usable.
 forced_accepted(){
-  local rc=0 failed_before snaps_before snap
-  echo 'forced failure accepted: a write was accepted before the failure; nothing may be restored' >&2
+  local mode=$1 rc=0 failed_before snaps_before snap
+  echo "forced failure $mode: a write was accepted before the failure; nothing may be restored" >&2
   failed_before=$(count_matches '/var/lib/openagentinbox/failed-upgrade-*')
   snaps_before=$(count_matches '/var/lib/openagentinbox/upgrade-snapshots/pre-*.sqlite')
   rm -f /var/lib/openagentinbox/test-accepted-write.log
-  forced_unpack accepted
+  forced_unpack "$mode"
   bash "$work/forced/install-openagentinbox.sh" --upgrade >"$work/upgrade.out" 2>"$work/upgrade.err" || rc=$?
   cat "$work/upgrade.err" >&2
-  [[ $rc != 0 ]] || die 'accepted: the upgrade reported success'
-  grep -Fq 'writes may have been accepted. Nothing was restored.' "$work/upgrade.err" || die 'accepted: the installer did not report the forward-only outcome'
-  ! grep -Fq 'Restored the previous running release' "$work/upgrade.err" || die 'accepted: the installer restored the copy over an accepted write'
-  grep -Fq 'accepted-write http=200' /var/lib/openagentinbox/test-accepted-write.log || die 'accepted: the candidate did not accept a write: the variant did not run'
-  [[ $(readlink -e /opt/openagentinbox/active) != "$before_target" ]] || die 'accepted: the active release was switched back'
-  [[ $(count_matches '/var/lib/openagentinbox/failed-upgrade-*') == "$failed_before" ]] || die 'accepted: a failed-upgrade directory was created'
-  [[ $(count_matches '/var/lib/openagentinbox/upgrade-snapshots/pre-*.sqlite') == $((snaps_before + 1)) ]] || die 'accepted: the pre-upgrade copy was not kept'
+  [[ $rc != 0 ]] || die "$mode: the upgrade reported success"
+  grep -Fq 'writes may have been accepted. Nothing was restored.' "$work/upgrade.err" || die "$mode: the installer did not report the forward-only outcome"
+  ! grep -Fq 'Restored the previous running release' "$work/upgrade.err" || die "$mode: the installer restored the copy over an accepted write"
+  grep -Fq 'accepted-write http=200' /var/lib/openagentinbox/test-accepted-write.log || die "$mode: the candidate did not accept a write: the variant did not run"
+  [[ $(readlink -e /opt/openagentinbox/active) != "$before_target" ]] || die "$mode: the active release was switched back"
+  ! systemctl is-active --quiet openagentinbox.service || die "$mode: the service was left running after a forward-only failure"
+  [[ $(count_matches '/var/lib/openagentinbox/failed-upgrade-*') == "$failed_before" ]] || die "$mode: a failed-upgrade directory was created"
+  [[ $(count_matches '/var/lib/openagentinbox/upgrade-snapshots/pre-*.sqlite') == $((snaps_before + 1)) ]] || die "$mode: the pre-upgrade copy was not kept"
   # By-hand recovery from the kept copy.
   snap=$(ls -1t /var/lib/openagentinbox/upgrade-snapshots/pre-*.sqlite | head -n 1)
   systemctl stop openagentinbox.service || true
@@ -276,14 +303,18 @@ forced_accepted(){
   ln -s "$before_target" /opt/openagentinbox/active.next.test
   mv -Tf /opt/openagentinbox/active.next.test /opt/openagentinbox/active
   systemctl start openagentinbox.service
-  wait_version "$old" || die 'accepted: the previous release did not start from the kept copy'
-  login_ok || die 'accepted: owner login failed after recovery from the kept copy'
+  wait_version "$old" || die "$mode: the previous release did not start from the kept copy"
+  login_ok || die "$mode: owner login failed after recovery from the kept copy"
 }
 
 refused_early
 forced_failure migrated 'forced failure migrated:'
+# The private check must not inherit any mail transport: configure all of them for this variant.
+printf 'INBOX_EMAIL_DOMAIN=inbox.test\nINBOX_EMAIL_SOCKET=/run/oai-test-lmtp.sock\nINBOX_EMAIL_RELAY=127.0.0.1:2525\nINBOX_EMAIL_SENDERS=operator\n' >> /etc/openagentinbox/settings.env
 forced_failure late 'forced failure late:'
-forced_accepted
+sed -i '/^INBOX_EMAIL_/d' /etc/openagentinbox/settings.env
+forced_accepted accepted
+forced_accepted unobserved
 direct_checks
 
 echo 'upgrade with the unmodified candidate: the host must still upgrade' >&2
@@ -294,5 +325,5 @@ login_ok || die 'owner login failed after the real upgrade'
 [[ $(count_matches '/var/lib/openagentinbox/upgrade-snapshots/pre-*.sqlite') -le 3 ]] || die 'old pre-upgrade copies were not pruned to three'
 [[ $(count_matches '/var/lib/openagentinbox/failed-upgrade-*') == 2 ]] || die 'a failed store was removed'
 
-printf '{"schema":"openagentinbox.upgrade-rollback/v2","status":"pass","variants":["early","migrated","late","accepted","direct","real"],"previous_version":"%s","candidate_version":"%s","previous_installer_sha256":"%s","candidate_installer_sha256":"%s","arch":"%s"}\n' \
+printf '{"schema":"openagentinbox.upgrade-rollback/v2","status":"pass","variants":["early","migrated","late","accepted","unobserved","direct","real"],"previous_version":"%s","candidate_version":"%s","previous_installer_sha256":"%s","candidate_installer_sha256":"%s","arch":"%s"}\n' \
   "$old" "$new" "$(sha256sum <"$previous_installer" | cut -d' ' -f1)" "$(sha256sum <"$candidate_installer" | cut -d' ' -f1)" "$arch"

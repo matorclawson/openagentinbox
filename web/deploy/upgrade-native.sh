@@ -135,23 +135,45 @@ if [[ -z $snap_sha ]]; then
   exit 1
 fi
 # BEGIN restore_store
-# archive_failed_store DB DIR: keep the active store and its sidecars in DIR under names no
-# earlier archive uses, so a retried restore never overwrites the first archive.
+# archive_failed_store DB DIR: keep the active store and its sidecars together in one
+# attempt directory under DIR, so no archive ever holds the main file of one state with the
+# sidecars of another. A directory is never reused for a different store: if one already
+# holds this very file (an interrupted earlier run), the remaining sidecars join it.
 archive_failed_store(){
-  local db=$1 dir=$2 n=0 suffix='' f
+  local db=$1 dir=$2 n=0 target='' a f
   install -d -m 0700 -o openagentinbox -g openagentinbox "$dir"
-  while [[ -e $dir/console.sqlite$suffix ]]; do n=$((n+1)); suffix=.$n; done
-  ln "$db" "$dir/console.sqlite$suffix"
-  for f in "$db-wal" "$db-shm"; do [[ ! -e $f ]] || mv -n "$f" "$dir/$(basename "$f")$suffix"; done
+  for a in "$dir"/attempt.*; do
+    [[ -e $a/console.sqlite && $db -ef $a/console.sqlite ]] && target=$a
+  done
+  if [[ -z $target ]]; then
+    while [[ -e $dir/attempt.$n ]]; do n=$((n+1)); done
+    target=$dir/attempt.$n
+    install -d -m 0700 -o openagentinbox -g openagentinbox "$target"
+    ln "$db" "$target/console.sqlite"
+  fi
+  for f in "$db-wal" "$db-shm"; do [[ ! -e $f ]] || mv -n "$f" "$target/$(basename "$f")"; done
+}
+# archive_stray_sidecars DB DIR: sidecars left beside a store that is not the failed one.
+archive_stray_sidecars(){
+  local db=$1 dir=$2 n=0 target f
+  [[ -e $db-wal || -e $db-shm ]] || return 0
+  install -d -m 0700 -o openagentinbox -g openagentinbox "$dir"
+  while [[ -e $dir/attempt.$n ]]; do n=$((n+1)); done
+  target=$dir/attempt.$n
+  install -d -m 0700 -o openagentinbox -g openagentinbox "$target"
+  for f in "$db-wal" "$db-shm"; do [[ ! -e $f ]] || mv -n "$f" "$target/$(basename "$f")"; done
 }
 # restore_store DB FAILED-DIR SNAPSHOT SNAPSHOT-SHA256 STAGING: console.sqlite is never absent.
-# The active store is hard-linked into the archive, then the copy replaces it by atomic
-# rename. If the active store already is the copy, an earlier run finished the replacement,
-# and it is left alone: it is never archived as a failed store. Run it again after any
-# interruption.
+# The active store is hard-linked into the archive with its sidecars, then the copy replaces
+# it by atomic rename. If the active file already is the copy, an earlier run finished the
+# replacement; any sidecar left beside it is archived, never replayed against the copy.
+# Run it again after any interruption.
 restore_store(){
   local db=$1 dir=$2 snap=$3 sha=$4 staging=$5
-  if [[ $(sha256sum < "$db" | cut -d' ' -f1) == "$sha" ]]; then return 0; fi
+  if [[ $(sha256sum < "$db" | cut -d' ' -f1) == "$sha" ]]; then
+    archive_stray_sidecars "$db" "$dir"
+    return 0
+  fi
   archive_failed_store "$db" "$dir"
   install -m 0600 -o openagentinbox -g openagentinbox "$snap" "$staging"
   mv -T "$staging" "$db"
@@ -210,31 +232,35 @@ systemd-run --quiet --unit="$check" --collect --property=User=openagentinbox --p
 wait_health "http://127.0.0.1:$cport/api/health" "$cinstance" "$check" &&
 curl -fsS --max-time 3 "http://127.0.0.1:$cport/api/health" | grep -Fq '"version":"0.12.11"' || rollback
 confirm_stopped "$check" || rollback
+# The store as the candidate left it, migrated and at rest. If the public start fails, a
+# store that still has exactly these rows accepted no write and can safely be restored.
+post_digest=$(runuser -u openagentinbox -- "$release/openagentinboxd" digest "$db") || rollback
+[[ -n $post_digest ]] || rollback
 activate "$release"
-# From the moment the public listener is reachable, the candidate may have accepted writes
-# that a restored copy would lose. wait_public records whether it ever was reachable. If
-# the start fails before that, rollback restores the copy. If it was reachable, the
-# release moves forward only: nothing is restored, and the copy is kept for reconciliation.
-public_seen=0
-wait_public(){
-  local i
-  for ((i=0;i<480;i++)); do
-    if (exec 3<>"/dev/tcp/127.0.0.1/4310") 2>/dev/null; then public_seen=1; fi
-    if curl -fsS --max-time 1 "$health" 2>/dev/null | grep -Fq '"version":"0.12.11"'; then return 0; fi
-    if [[ $i -ge 8 ]] && ! systemctl is-active --quiet "$service"; then return 1; fi
-    sleep 0.25
-  done
-  return 1
+# After the private check the store is at rest with a known digest. A failed public start is
+# rolled back only if the store still has exactly those rows. Any difference means the
+# candidate accepted a write that a restored copy would lose, and the release moves forward
+# only. This does not depend on seeing the public listener, so a brief window cannot hide a
+# write.
+wait_public(){ wait_health "$health" '"version":"0.12.11"' "$service"; }
+public_failure(){
+  local now
+  show_logs
+  if ! confirm_stopped "$service"; then
+    echo "Could not confirm the service stopped, so the store was not touched. The pre-upgrade copy is $snap." >&2
+    exit 1
+  fi
+  if now=$(runuser -u openagentinbox -- "$release/openagentinboxd" digest "$db") && [[ $now == "$post_digest" ]]; then
+    rollback
+  fi
+  echo "Upgrade failed after the store changed beyond the private check, or the store could not be compared, so writes may have been accepted. Nothing was restored. The active release is $release, the store at $db is kept and the service is stopped. The pre-upgrade copy is $snap. Fix forward and start openagentinbox.service, or reconcile the accepted writes and restore the copy by hand." >&2
+  exit 1
 }
 if systemctl start "$service" && wait_public; then
   echo "Serving $version. Previous release retained at $previous. Pre-upgrade copy: $snap"
   # Keep the newest three copies. Failed stores are never removed here.
   mapfile -t stale < <(ls -1t "$snaps"/pre-*.sqlite 2>/dev/null | tail -n +4)
   (( ${#stale[@]} == 0 )) || rm -f -- "${stale[@]}"
-elif (( public_seen )) || (exec 3<>"/dev/tcp/127.0.0.1/4310") 2>/dev/null; then
-  show_logs
-  echo "Upgrade failed after the public listener was reachable, so writes may have been accepted. Nothing was restored. The active release is $release and the store at $db is in use. The pre-upgrade copy is $snap. Fix forward, or stop openagentinbox.service, reconcile the accepted writes and restore the copy by hand." >&2
-  exit 1
 else
-  rollback
+  public_failure
 fi
