@@ -114,19 +114,23 @@ case $mode in
     exec \$real "\$@";;
   accepted)
     if [[ \$port != 4310 ]]; then exec \$real "\$@"; fi
-    # Public phase: serve, accept one real write (a login creates a session), stay up long
-    # enough for the installer to see the listener, then die before readiness is reported.
-    \$real "\$@" &
+    # Public phase. A listener on 4310 that answers every request without the candidate's
+    # version, so the installer sees the public port open but never ready. The candidate
+    # itself runs on 4311 against the real store and accepts one real write (a login
+    # creates a session). Then everything dies and the start fails.
+    python3 -I -c 'import http.server as h; h.HTTPServer(("127.0.0.1",4310),h.BaseHTTPRequestHandler).serve_forever()' 2>/dev/null &
+    front=\$!
+    INBOX_PORT=4311 \$real "\$@" &
     child=\$!
     for ((i=0;i<240;i++)); do
-      curl -fsS --max-time 1 "http://127.0.0.1:4310/api/health" 2>/dev/null | grep -Fq '"version"' && break
+      curl -fsS --max-time 1 "http://127.0.0.1:4311/api/health" 2>/dev/null | grep -Fq '"version"' && break
       sleep 0.5
     done
-    code=\$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' -X POST -H 'Origin: $origin' -H 'content-type: application/json' --data '{"username":"owner","password":"$password"}' http://127.0.0.1:4310/api/login)
+    code=\$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' -X POST -H 'Origin: $origin' -H 'content-type: application/json' --data '{"username":"owner","password":"$password"}' http://127.0.0.1:4311/api/login)
     echo "accepted-write http=\$code" > /var/lib/openagentinbox/test-accepted-write.log
     sleep 2
-    kill -9 \$child 2>/dev/null; wait \$child 2>/dev/null
-    echo 'forced failure accepted: failed after the public listener accepted a write' >&2
+    kill -9 \$child \$front 2>/dev/null; wait \$child \$front 2>/dev/null
+    echo 'forced failure accepted: failed after a write was accepted and the public port was open' >&2
     exit 1;;
   migrated)
     if [[ \$port == 4310 ]]; then exec \$real "\$@"; fi
