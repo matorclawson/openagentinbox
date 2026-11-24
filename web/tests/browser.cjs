@@ -14,7 +14,7 @@ const fs = require("fs"),
       stdio: ["ignore", "inherit", "inherit"],
     },
   );
-  let browser;
+  let browser, context;
   try {
     for (let i = 0; i < 100; i++) {
       try {
@@ -32,7 +32,7 @@ const fs = require("fs"),
         args: ["--no-sandbox", "--disable-dev-shm-usage", "--no-zygote", "--single-process"],
       } : {}),
     });
-    const context = await browser.newContext({
+    context = await browser.newContext({
       viewport: { width: 1200, height: 800 },
     });
     const page = await context.newPage();
@@ -227,11 +227,35 @@ const fs = require("fs"),
       )
     )
       throw Error("mobile overflows");
-    await page.getByRole("button", { name: "Sign out" }).click();
+    const mailboxes = page.getByRole("button", { name: "Mailboxes", exact: true });
+    await mailboxes.click();
+    await page.getByRole("button", { name: "Sign out", exact: true }).click();
     await page.getByRole("button", { name: "Sign in", exact: true }).waitFor();
     console.log(
       "PASS: Browser onboarding, provisioning, compose, agent reply, conversation, message detail, mobile width and sign-out",
     );
+  } catch (error) {
+    const failedPage = context?.pages().at(-1);
+    if (failedPage) {
+      const screenshot = path.resolve(process.env.INBOX_BROWSER_FAILURE_SCREENSHOT ||
+        path.join(__dirname, "../../build/browser-failure.png"));
+      try {
+        fs.mkdirSync(path.dirname(screenshot), { recursive: true });
+        await failedPage.screenshot({
+          path: screenshot,
+          timeout: 5000,
+          mask: [
+            failedPage.locator('input[type="password"]'),
+            failedPage.getByLabel("Setup code"),
+            failedPage.getByLabel("Pairing token", { exact: true }),
+          ],
+        });
+        console.error("Browser failure screenshot:", screenshot);
+      } catch (captureError) {
+        console.error("Could not capture browser failure:", captureError.message);
+      }
+    }
+    throw error;
   } finally {
     if (browser) await browser.close();
     proc.kill();

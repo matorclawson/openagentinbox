@@ -23,6 +23,9 @@ PLAYWRIGHT_MODULE=/absolute/path/to/node_modules/playwright \
 
 `CHROME_PATH` defaults to `/Applications/Google Chrome.app`. The gate sets
 `INBOX_DAEMON` to the daemon built from the checked-out source.
+If the browser journey fails after opening a page, retain
+`build/browser-failure.png` alongside the run log. Set
+`INBOX_BROWSER_FAILURE_SCREENSHOT` to direct it to a different path.
 
 Build web release archives on ENG-UK. Test deployable Go services on their
 target OS and architecture. Run Darwin tools on ENG-UK. The small VPSes
