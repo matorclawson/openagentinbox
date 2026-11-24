@@ -1,37 +1,96 @@
-const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
-const fs = require("fs"),
-  child = require("child_process"),
-  path = require("path");
-(async () => {
-  const dir = fs.mkdtempSync("/tmp/oai-browser-"),
-    port = 4439,
-    url = "http://127.0.0.1:" + port;
-  const proc = child.spawn(
-    process.env.INBOX_DAEMON || `../dist/${process.platform}-${process.arch==='x64'?'amd64':process.arch}/openagentinboxd`,
-    ["serve"],
-    {
-      env: { ...process.env, INBOX_UI: path.resolve("out"), INBOX_DATA: dir, INBOX_PORT: String(port) },
-      stdio: ["ignore", "inherit", "inherit"],
-    },
-  );
-  let browser;
-  try {
-    for (let i = 0; i < 100; i++) {
-      try {
-        if ((await fetch(url + "/api/session")).ok) break;
-      } catch {}
-      await new Promise((r) => setTimeout(r, 100));
+const { chromium } = require("playwright-core");
+const fs = require("node:fs"),
+  child = require("node:child_process"),
+  path = require("node:path");
+const { randomUUID } = require("node:crypto");
+const { once } = require("node:events");
+const { createServer } = require("node:net");
+const { setTimeout: delay } = require("node:timers/promises");
+
+const host = "127.0.0.1";
+
+async function freePort() {
+  const socket = createServer();
+  const listening = once(socket, "listening");
+  socket.listen(0, host);
+  await listening;
+  const { port } = socket.address();
+  await new Promise((resolve, reject) => socket.close(error => error ? reject(error) : resolve()));
+  return port;
+}
+
+async function waitForFixture(url, instance, processError) {
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    const startError = processError();
+    if (startError) throw startError;
+    const response = await fetch(url + "/api/health", {
+      redirect: "error",
+      signal: AbortSignal.timeout(500),
+    }).catch(() => null);
+    if (response) {
+      if (!response.ok) throw Error("Browser fixture health returned HTTP " + response.status);
+      const health = await response.json();
+      if (health.product !== "openagentinbox" || health.instance !== instance || health.setup !== true) {
+        throw Error("Browser fixture listener identity or fresh setup state did not match");
+      }
+      const exitError = processError();
+      if (exitError) throw exitError;
+      return;
     }
-    browser = await chromium.launch({
-      executablePath: process.env.CHROMIUM_PATH,
-      args: [
-        "--no-sandbox",
-        "--disable-dev-shm-usage",
-        "--no-zygote",
-        "--single-process",
-      ],
+    await delay(100);
+  }
+  throw Error("Timed out waiting for the browser fixture daemon");
+}
+
+(async () => {
+  const daemon = process.argv[2];
+  if (!daemon || !path.isAbsolute(daemon)) throw Error("Supply the absolute path of the built fixture daemon");
+  const arch = process.arch === "x64" ? "amd64" : process.arch;
+  const native = path.resolve(__dirname, "../../dist/ui/clients", process.platform + "-" + arch);
+  fs.accessSync(daemon, fs.constants.X_OK);
+  fs.accessSync(native, fs.constants.X_OK);
+  const dir = fs.mkdtempSync("/tmp/oai-browser-");
+  const fixtureEnv = { HOME: dir, TMPDIR: dir, PATH: "/usr/bin:/bin" };
+  let proc, closed, spawnError, browser, context;
+  try {
+    const port = await freePort();
+    const url = "http://" + host + ":" + port;
+    // The reservation is released before spawning. A fresh instance ID rejects a
+    // different listener if another process acquires the port in that interval.
+    const instance = randomUUID();
+    proc = child.spawn(daemon, ["serve"], {
+      env: {
+        ...fixtureEnv,
+        INBOX_LISTEN: host,
+        INBOX_ORIGIN: url,
+        INBOX_PORT: String(port),
+        INBOX_UI: path.resolve(__dirname, "../out"),
+        INBOX_DATA: dir,
+        INBOX_DEPLOY_INSTANCE: instance,
+      },
+      stdio: ["ignore", "inherit", "inherit"],
     });
-    const context = await browser.newContext({
+    closed = new Promise(resolve => proc.once("close", resolve));
+    proc.once("error", error => { spawnError = error; });
+    await waitForFixture(url, instance, () => {
+      if (spawnError) return spawnError;
+      if (proc.exitCode !== null || proc.signalCode !== null) {
+        return Error("Browser fixture daemon exited: " + (proc.exitCode ?? proc.signalCode));
+      }
+    });
+    const chromePath = process.env.CHROME_PATH || "/Applications/Google Chrome.app";
+    const executablePath = chromePath?.endsWith(".app")
+      ? path.join(chromePath, "Contents", "MacOS", "Google Chrome")
+      : chromePath;
+    browser = await chromium.launch({
+      executablePath,
+      env: fixtureEnv,
+      ...(process.platform === "linux" ? {
+        args: ["--no-sandbox", "--disable-dev-shm-usage", "--no-zygote", "--single-process"],
+      } : {}),
+    });
+    context = await browser.newContext({
       viewport: { width: 1200, height: 800 },
     });
     const page = await context.newPage();
@@ -50,15 +109,14 @@ const fs = require("fs"),
     await page.getByRole("button",{name:"Agents",exact:true}).click();
     await page.getByRole("button",{name:"Generate pairing token"}).click();
     const pairCode=await page.getByLabel("Pairing token",{exact:true}).inputValue();
-    const native=process.env.INBOX_CLIENT || path.resolve("../dist/ui/clients/"+process.platform+"-"+(process.arch==="x64"?"amd64":process.arch));
-    const login=child.spawnSync(native,["login",url],{env:{...process.env,HOME:dir},input:pairCode+"\n",encoding:"utf8"});
+    const login=child.spawnSync(native,["login",url],{env:fixtureEnv,input:pairCode+"\n",encoding:"utf8"});
     if(login.status!==0 || JSON.parse(login.stdout).status!=="paired")throw Error("CLI login failed");
     await page.getByText("CLI paired.",{exact:true}).waitFor();
     await page.getByLabel("Paired client",{exact:true}).selectOption({index:1});
     await page.getByLabel("Agent names",{exact:true}).fill("onboarding-demo");
     await page.getByRole("button",{name:"Authorize onboarding"}).click();
     await page.getByText(/Onboarding authorized/).waitFor();
-    const onboard=child.spawnSync(native,["onboard",url],{env:{...process.env,HOME:dir},encoding:"utf8"});
+    const onboard=child.spawnSync(native,["onboard",url],{env:fixtureEnv,encoding:"utf8"});
     if(onboard.status!==0||JSON.parse(onboard.stdout).status!=="verified")throw Error("Native onboarding failed: "+onboard.stderr);
     await page.getByText(/CLI verified/).first().waitFor();
     const snapshot = await page.evaluate(async () => (await fetch("/api/desk/live")).json());
@@ -95,7 +153,7 @@ const fs = require("fs"),
     await fleet.close();
     await page.getByRole("button",{name:"Revoke CLI"}).click();
     await page.getByText("CLI revoked.",{exact:true}).waitFor();
-    const status=child.spawnSync(native,["status",url],{env:{...process.env,HOME:dir},encoding:"utf8"});
+    const status=child.spawnSync(native,["status",url],{env:fixtureEnv,encoding:"utf8"});
     if(status.status!==1||!status.stderr.includes("401"))throw Error("CLI still authorized after revocation");
     const discovery = await (
       await fetch(url + "/.well-known/openagentinbox.json")
@@ -110,8 +168,7 @@ const fs = require("fs"),
         (
           await exec(process.execPath, [cli, ...args], {
             env: {
-              PATH: process.env.PATH,
-              HOME: dir,
+              ...fixtureEnv,
               OPENAGENTINBOX_PROFILE: path.join(dir, "codex/agent.json"),
             },
           })
@@ -148,14 +205,20 @@ const fs = require("fs"),
       "Send me the three papers you recommend."
     )
       throw Error("agent body");
-    await page.getByRole("button", { name: "Inbox", exact: true }).click();
-    await call(
+    const reply = await call(
       "reply", mail.rows[0].id,
       "operator",
       "Your reading list",
       "The reading list is ready.",
     );
-    await page.locator(".letter").filter({hasText:"Your reading list"}).click();
+    if (!reply.id) throw Error("Agent reply did not return a message ID");
+    await page.getByRole("button", { name: "Inbox", exact: true }).click();
+    await page.locator(`a[data-message="${reply.id}"]`)
+      .getByText("Your reading list", { exact: true }).click();
+    await page.getByRole("heading", { name: "Weekly reading list", exact: true }).waitFor();
+    await page.getByRole("button", { name: /Your reading list/ }).click();
+    await page.getByRole("link", { name: /^Open message page/ }).click();
+    await page.waitForURL(`**/messages/${reply.id}`);
     await page.getByText("The reading list is ready.").waitFor();
     const receipt=await call("receipt",mail.rows[0].id);
     if(receipt.state!=="resolved"||receipt.opened<=0||receipt.replied<=0)throw Error("Incomplete request receipt");
@@ -166,6 +229,7 @@ const fs = require("fs"),
     await page.getByText("The reading list is ready.").waitFor();
     await page.context().grantPermissions(["clipboard-read","clipboard-write"]);
     await page.getByRole("button",{name:"Copy message ID"}).click();
+    await page.getByText("Message ID copied.", { exact: true }).waitFor();
     if (await page.evaluate(()=>navigator.clipboard.readText()) !== messageID) throw Error("Wrong ID copied");
     const agents = await page.evaluate(async () => {
       const result=[];
@@ -181,8 +245,9 @@ const fs = require("fs"),
     const profiles=path.join(dir,".config/openagentinbox/seats");
     fs.mkdirSync(profiles,{recursive:true});
     fs.writeFileSync(path.join(profiles,seat+".json"),JSON.stringify({name:seat,origin:url,token:agents[0].credential}),{mode:0o600});
-    const seatCLI=(...args)=>child.spawnSync(native,["--seat",seat,...args],{env:{...process.env,HOME:dir},encoding:"utf8"});
+    const seatCLI=(...args)=>child.spawnSync(native,["--seat",seat,...args],{env:fixtureEnv,encoding:"utf8"});
     if(JSON.parse(seatCLI("whoami").stdout).name!==seat || !seatCLI("read",messageID).stderr.includes("404"))throw Error("Unexpected initial seat access");
+    await page.getByText("Share access", { exact: true }).click();
     await page.getByLabel("Grant read access to an agent").fill(seat);
     await page.getByRole("button",{name:"Grant access"}).click();
     await page.getByText(seat+" can now read this message by ID.").waitFor();
@@ -218,15 +283,45 @@ const fs = require("fs"),
       )
     )
       throw Error("mobile overflows");
-    await page.getByRole("button", { name: "Sign out" }).click();
+    const mailboxes = page.getByRole("button", { name: "Mailboxes", exact: true });
+    await mailboxes.click();
+    await page.getByRole("button", { name: "Sign out", exact: true }).click();
     await page.getByRole("button", { name: "Sign in", exact: true }).waitFor();
     console.log(
-      "PASS: Chromium onboarding, provisioning, compose, agent reply, inbox detail, mobile width and sign-out",
+      "PASS: Browser onboarding, provisioning, compose, agent reply, conversation, message detail, mobile width and sign-out",
     );
+  } catch (error) {
+    const failedPage = context?.pages().at(-1);
+    if (failedPage) {
+      const screenshot = path.resolve(process.env.INBOX_BROWSER_FAILURE_SCREENSHOT ||
+        path.join(__dirname, "../../build/browser-failure.png"));
+      try {
+        fs.mkdirSync(path.dirname(screenshot), { recursive: true });
+        await failedPage.screenshot({
+          path: screenshot,
+          timeout: 5000,
+          mask: [
+            failedPage.locator('input[type="password"]'),
+            failedPage.getByLabel("Setup code"),
+            failedPage.getByLabel("Pairing token", { exact: true }),
+          ],
+        });
+        console.error("Browser failure screenshot:", screenshot);
+      } catch (captureError) {
+        console.error("Could not capture browser failure:", captureError.message);
+      }
+    }
+    throw error;
   } finally {
-    if (browser) await browser.close();
-    proc.kill();
-    fs.rmSync(dir, { force: true, recursive: true });
+    try {
+      if (browser) await browser.close();
+    } finally {
+      if (proc) {
+        proc.kill();
+        await closed;
+      }
+      fs.rmSync(dir, { force: true, recursive: true });
+    }
   }
 })().catch((e) => {
   console.error(e);

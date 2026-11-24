@@ -1,0 +1,76 @@
+package main
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"testing"
+)
+
+func TestDeliverAdvancesOnlyAfterSuccessfulWake(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fixture.json")
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.Method != http.MethodGet || r.URL.Path != "/api/agent/notice" || r.URL.Query().Get("after") != "0" {
+			t.Errorf("unexpected notice request: %s %s", r.Method, r.URL.RequestURI())
+			http.Error(w, "bad notice request", http.StatusBadRequest)
+			return
+		}
+		json.NewEncoder(w).Encode(noticeHead{Cursor: 31, Count: 2})
+	}))
+	defer server.Close()
+	p := profile{Origin: server.URL, Name: "fixture-seat"}
+	wakeError := errors.New("fixture wake failed")
+	if err := deliver(t.Context(), path, p, func(string) error { return wakeError }); !errors.Is(err, wakeError) {
+		t.Fatalf("failed wake: %v", err)
+	}
+	assertCursor := func(want int64) {
+		t.Helper()
+		err := stateAt(path, func(s *noticeState) error {
+			if s.Delivered != want {
+				t.Errorf("recorded cursor = %d, want %d", s.Delivered, want)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertCursor(0)
+
+	if err := deliver(t.Context(), path, p, func(notice string) error {
+		if !strings.Contains(notice, "2 new deliveries for fixture-seat") || !strings.Contains(notice, "Mailbox cursor 31.") {
+			t.Errorf("unexpected notification: %q", notice)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("successful wake: %v", err)
+	}
+	assertCursor(31)
+
+	if err := deliver(t.Context(), path, p, func(string) error {
+		t.Error("sent another wake inside the cooldown")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("notice requests = %d, want 2", got)
+	}
+}
+
+func TestNoticeReadyFocusAndDigest(t *testing.T) {
+	focus := noticeState{Mode: "focus", Until: 100}
+	if focus.ready(99) || !focus.ready(100) || focus.Mode != "available" || focus.Until != 0 {
+		t.Fatalf("unexpected focus transition: %+v", focus)
+	}
+	digest := noticeState{Mode: "digest", First: 100, Interval: 60, Last: 110}
+	if digest.ready(159) || digest.ready(169) || !digest.ready(170) {
+		t.Fatal("digest must respect both interval and cooldown")
+	}
+}
