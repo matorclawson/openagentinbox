@@ -79,14 +79,20 @@ data=/var/lib/openagentinbox
 db=$data/console.sqlite
 snaps=$data/upgrade-snapshots
 check=openagentinbox-upgrade-check
-# confirm_stopped UNIT: stop it and prove it is gone (inactive or failed, no main process).
+# confirm_stopped UNIT: stop it and prove it is gone. Every query must succeed and show the
+# unit inactive or failed, no main process, and no process left in its control group; a
+# query that fails counts as not confirmed.
 confirm_stopped(){
-  local unit=$1 i
+  local unit=$1 i state pid cg
   systemctl stop "$unit" 2>/dev/null || true
   for ((i=0;i<120;i++)); do
-    case $(systemctl is-active "$unit" 2>/dev/null || true) in
-      inactive|failed|unknown) [[ $(systemctl show -p MainPID --value "$unit" 2>/dev/null || echo 0) == 0 ]] && return 0;;
-    esac
+    if state=$(systemctl show -p ActiveState --value "$unit" 2>/dev/null) &&
+       pid=$(systemctl show -p MainPID --value "$unit" 2>/dev/null) &&
+       cg=$(systemctl show -p ControlGroup --value "$unit" 2>/dev/null) &&
+       [[ $state == inactive || $state == failed ]] && [[ $pid == 0 ]] &&
+       { [[ -z $cg || ! -s /sys/fs/cgroup$cg/cgroup.procs ]]; }; then
+      return 0
+    fi
     sleep 0.5
   done
   return 1
@@ -110,9 +116,15 @@ if ! confirm_stopped "$service"; then
   echo 'Could not confirm the previous service stopped. Nothing was changed.' >&2
   exit 1
 fi
-if ! runuser -u openagentinbox -- "$release/openagentinboxd" snapshot "$db" "$snap" >/dev/null; then
+if ! manifest=$(runuser -u openagentinbox -- "$release/openagentinboxd" snapshot "$db" "$snap"); then
   systemctl start "$service" || true
   echo 'Could not take the pre-upgrade copy. The store is unchanged; restarted the previous release.' >&2
+  exit 1
+fi
+snap_sha=$(printf '%s' "$manifest" | sed -n 's/.*"sha256":"\([0-9a-f]\{64\}\)".*/\1/p')
+if [[ -z $snap_sha ]]; then
+  systemctl start "$service" || true
+  echo 'The pre-upgrade copy reported no checksum. The store is unchanged; restarted the previous release.' >&2
   exit 1
 fi
 # Undo a failed upgrade: confirm nothing else holds the store, keep the failed store for
@@ -123,10 +135,26 @@ rollback(){
     echo "Could not confirm the upgrade processes stopped, so the store was not touched. The pre-upgrade copy is $snap. Stop openagentinbox.service and $check.service, then restore it by hand." >&2
     exit 1
   fi
+  # The copy must still match the checksum taken when it was written.
+  if [[ $(sha256sum < "$snap" | cut -d' ' -f1) != "$snap_sha" ]]; then
+    echo "The pre-upgrade copy $snap no longer matches its checksum, so the store was not touched. Do not restore it." >&2
+    exit 1
+  fi
+  # console.sqlite is never absent: the failed store is hard-linked aside, then the copy
+  # replaces it by atomic rename. Signals are ignored for these few steps. If the process
+  # still dies between them, the active store is the failed one and the copy is intact:
+  # run the same steps again by hand.
+  trap '' INT TERM HUP
   install -d -m 0700 -o openagentinbox -g openagentinbox "$failed"
+  ln -f "$db" "$failed/console.sqlite"
+  for f in "$db-wal" "$db-shm"; do [[ ! -e $f ]] || mv -f "$f" "$failed/"; done
   install -m 0600 -o openagentinbox -g openagentinbox "$snap" "$data/.restore.$stamp"
-  for f in "$db" "$db-wal" "$db-shm"; do [[ ! -e $f ]] || mv -f "$f" "$failed/"; done
   mv -T "$data/.restore.$stamp" "$db"
+  trap - INT TERM HUP
+  if [[ $(sha256sum < "$db" | cut -d' ' -f1) != "$snap_sha" ]]; then
+    echo "The restored store does not match the pre-upgrade copy $snap. The previous release was not started. The failed store is in $failed." >&2
+    exit 1
+  fi
   activate "$previous"
   if systemctl start "$service" && wait_health "$health" "\"version\":\"$before\"" "$service"; then
     echo "Upgrade failed. Restored the previous running release and its data from $snap. The failed store is kept in $failed; it holds anything the candidate wrote after the copy." >&2
@@ -141,12 +169,18 @@ rollback(){
 # answered. A candidate that fails here is rolled back before it could accept public writes.
 cport=$((20000 + RANDOM % 20000))
 cinstance=$(cat /proc/sys/kernel/random/uuid)
+# The service's environment files override Environment= properties, so the port and the
+# other settings that matter are applied by env(1) on the command line, where they win.
+# Mail transport, the escalation mailbox and any non-loopback bind are removed: an
+# unproven candidate must not receive mail, send mail or listen beyond loopback.
+envbin=$(command -v env)
 systemd-run --quiet --unit="$check" --collect --property=User=openagentinbox --property=Group=openagentinbox \
   --property=WorkingDirectory="$release" --property=UMask=0077 --property=NoNewPrivileges=yes --property=PrivateTmp=yes \
   --property=ProtectHome=yes --property=ProtectSystem=strict --property=ReadWritePaths="$data" \
   --property=Environment=INBOX_DATA="$data" --property=EnvironmentFile=/etc/openagentinbox/origin.env \
   --property=EnvironmentFile=-/etc/openagentinbox/settings.env \
-  --property=Environment=INBOX_PORT="$cport" --property=Environment=INBOX_DEPLOY_INSTANCE="$cinstance" \
+  "$envbin" -u INBOX_EMAIL_DOMAIN -u INBOX_EMAIL_SOCKET -u INBOX_EMAIL_RELAY -u INBOX_EMAIL_SENDERS -u INBOX_ESCALATION_MAILBOX \
+  INBOX_DATA="$data" INBOX_LISTEN=127.0.0.1 INBOX_PORT="$cport" INBOX_DEPLOY_INSTANCE="$cinstance" \
   "$release/openagentinboxd" serve || rollback
 wait_health "http://127.0.0.1:$cport/api/health" "$cinstance" "$check" &&
 curl -fsS --max-time 3 "http://127.0.0.1:$cport/api/health" | grep -Fq '"version":"0.12.11"' || rollback
@@ -154,6 +188,9 @@ confirm_stopped "$check" || rollback
 activate "$release"
 if systemctl start "$service" && wait_health "$health" '"version":"0.12.11"' "$service"; then
   echo "Serving $version. Previous release retained at $previous. Pre-upgrade copy: $snap"
+  # Keep the newest three copies. Failed stores are never removed here.
+  mapfile -t stale < <(ls -1t "$snaps"/pre-*.sqlite 2>/dev/null | tail -n +4)
+  (( ${#stale[@]} == 0 )) || rm -f -- "${stale[@]}"
 else
   rollback
 fi
