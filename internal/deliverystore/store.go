@@ -82,12 +82,20 @@ var (
 )
 
 type Store struct {
+	mailWrites     mailWriteQueue
 	insertDelivery *sql.Stmt
 	selectUnread   *sql.Stmt
 	watch          watchHub
 	db             *sql.DB
 	readers        *sql.DB
 }
+
+// Writer returns the store-owned serialized connection for same-database extensions.
+// The Store owns its lifetime and pool configuration.
+func (s *Store) Writer() *sql.DB { return s.db }
+
+// Reader returns the bounded read pool used for committed snapshots.
+func (s *Store) Reader() *sql.DB { return s.readDB() }
 
 func (s *Store) readDB() *sql.DB {
 	if s.readers != nil {
@@ -106,10 +114,12 @@ func OpenMirror(path string) (*Store, error) { return openStore(path, false) }
 func openStore(path string, reliable bool) (*Store, error) {
 	// Configure EVERY connection, including replacements after a cancelled query.
 	q := url.Values{}
-	for _, pragma := range []string{"busy_timeout(5000)", "synchronous(FULL)", "foreign_keys(ON)", "fullfsync(ON)", "checkpoint_fullfsync(ON)", "cache_size(-16384)", "mmap_size(0)", "temp_store(FILE)", "wal_autocheckpoint(256)"} {
+	q.Set("_txlock", "immediate")
+	for _, pragma := range []string{"busy_timeout(5000)", "synchronous(FULL)", "foreign_keys(ON)", "fullfsync(ON)", "checkpoint_fullfsync(ON)", "mmap_size(0)", "temp_store(FILE)", "wal_autocheckpoint(256)"} {
 		q.Add("_pragma", pragma)
 	}
-	u := url.URL{Scheme: "file", Opaque: (&url.URL{Path: path}).EscapedPath(), RawQuery: q.Encode()}
+	writerQuery := q.Encode() + "&_pragma=cache_size(-4096)"
+	u := url.URL{Scheme: "file", Opaque: (&url.URL{Path: path}).EscapedPath(), RawQuery: writerQuery}
 	if path == ":memory:" {
 		u.Opaque = ":memory:"
 	}
@@ -117,7 +127,7 @@ func openStore(path string, reliable bool) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1) // ONE writer; reads in this prototype share it
+	db.SetMaxOpenConns(1) // Transactions serialize on this connection.
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, err
@@ -136,8 +146,10 @@ func openStore(path string, reliable bool) (*Store, error) {
 		return nil, err
 	}
 	if path != ":memory:" {
+		q.Del("_txlock")
 		q.Add("mode", "ro")
 		q.Add("_pragma", "query_only(ON)")
+		q.Add("_pragma", "cache_size(-1024)")
 		u.RawQuery = q.Encode()
 		rd, err := sql.Open("sqlite", u.String())
 		if err != nil {
@@ -303,11 +315,15 @@ func (s *Store) Sender(id string) (string, bool, error) {
 }
 
 type Message struct {
+	ThreadHint string // Derived by the transport; excluded from the submission digest.
+
 	ID, Sender, ConversationID, ParentID, Subject string
+	Intent                                        string
 	Priority                                      int
 	Final                                         bool // the sender expects no answer: never owed
 	Recipients                                    []string
 	Body                                          []byte
+	ExternalPayloadDigest                         []byte // Optional digest of transport-specific content committed by the acceptance callback.
 }
 
 // digest frames every field with its length, so no two different messages share a digest (("a\0b","c") and ("a","b\0c")
@@ -326,6 +342,13 @@ func digest(m Message) []byte {
 	if m.Final { // only when set, so the digest of every message accepted before the field existed is unchanged
 		field([]byte("final"))
 	}
+	if m.Intent != "" {
+		field([]byte("intent/" + m.Intent))
+	}
+	if len(m.ExternalPayloadDigest) > 0 {
+		field([]byte("transport"))
+		field(m.ExternalPayloadDigest)
+	}
 	return h.Sum(nil)
 }
 
@@ -337,6 +360,11 @@ func (s *Store) Accept(opKey string, m Message, now time.Time) (string, error) {
 
 // AcceptContext is Accept with cancellation while waiting for storage or executing SQL.
 func (s *Store) AcceptContext(ctx context.Context, opKey string, m Message, now time.Time) (string, error) {
+	return s.AcceptWithReceipt(ctx, opKey, m, now, nil)
+}
+
+// AcceptWithReceipt atomically applies delivery-specific bookkeeping on first insertion.
+func (s *Store) AcceptWithReceipt(ctx context.Context, opKey string, m Message, now time.Time, record func(*sql.Tx) error) (string, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return "", err
@@ -348,6 +376,11 @@ func (s *Store) AcceptContext(ctx context.Context, opKey string, m Message, now 
 	}
 	if !inserted {
 		return id, nil
+	}
+	if record != nil {
+		if err = record(tx); err != nil {
+			return "", err
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return "", err
@@ -371,8 +404,12 @@ func (s *Store) acceptTx(ctx context.Context, tx *sql.Tx, opKey string, m Messag
 		return "", false, err
 	}
 	prev := previewPrefix(m.Body)
+	conversation := m.ConversationID
+	if conversation == "" {
+		conversation = m.ThreadHint
+	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO messages (seq,id, sender, conversation_id, parent_id, subject, priority, created_at, bytes, preview, body, final, created_text, display_body)
-	  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, sequence, m.ID, m.Sender, m.ConversationID, m.ParentID, m.Subject, m.Priority, now.UnixMilli(), len(m.Body), prev, m.Body, b2i(m.Final), now.UTC().Format(time.RFC3339Nano), DisplayBody(m.Body))
+	  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, sequence, m.ID, m.Sender, conversation, m.ParentID, m.Subject, m.Priority, now.UnixMilli(), len(m.Body), prev, m.Body, b2i(m.Final), now.UTC().Format(time.RFC3339Nano), DisplayBody(m.Body))
 	if err != nil {
 		return "", false, err
 	}

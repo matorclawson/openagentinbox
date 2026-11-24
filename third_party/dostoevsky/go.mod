@@ -1,3 +1,3 @@
-module github.com/rodriveracom/openagentinbox/third_party/dostoevsky
+module github.com/rodriveracom/dostoevsky
 
 go 1.22

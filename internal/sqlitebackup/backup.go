@@ -38,7 +38,47 @@ func open(path string) (*sql.DB, error) {
 
 // Create publishes only after integrity checks, hash and fsync. Existing destinations are never overwritten.
 // Source must be a local SQLite database, not a network filesystem. Caller supplies a private destination directory.
-func Create(ctx context.Context, source, destination string) (m Manifest, err error) {
+func Create(ctx context.Context, source, destination string) (Manifest, error) {
+	return create(ctx, source, destination, Verify)
+}
+
+// Snapshot is Create for any SQLite store, including one that predates the current schema.
+// It checks integrity and records size and hash, but not message counts, so an upgrade can
+// keep a restorable copy of whatever version is running. Counts in the Manifest are zero.
+func Snapshot(ctx context.Context, source, destination string) (Manifest, error) {
+	return create(ctx, source, destination, integrity)
+}
+func integrity(ctx context.Context, path string) (m Manifest, err error) {
+	db, err := open(path)
+	if err != nil {
+		return m, err
+	}
+	defer db.Close()
+	var result string
+	if err = db.QueryRowContext(ctx, `PRAGMA integrity_check`).Scan(&result); err != nil {
+		return m, err
+	}
+	if result != "ok" {
+		return m, fmt.Errorf("integrity check: %s", result)
+	}
+	return fileManifest(path)
+}
+func fileManifest(path string) (m Manifest, err error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return m, err
+	}
+	defer f.Close()
+	h := sha256.New()
+	m.Bytes, err = io.CopyBuffer(h, f, make([]byte, 64<<10))
+	if err != nil {
+		return m, err
+	}
+	m.Path = path
+	m.SHA256 = hex.EncodeToString(h.Sum(nil))
+	return m, nil
+}
+func create(ctx context.Context, source, destination string, check func(context.Context, string) (Manifest, error)) (m Manifest, err error) {
 	source, err = filepath.Abs(source)
 	if err != nil {
 		return m, err
@@ -79,7 +119,7 @@ func Create(ctx context.Context, source, destination string) (m Manifest, err er
 	if closeErr != nil {
 		return m, closeErr
 	}
-	m, err = Verify(ctx, tmp)
+	m, err = check(ctx, tmp)
 	if err != nil {
 		return m, err
 	}

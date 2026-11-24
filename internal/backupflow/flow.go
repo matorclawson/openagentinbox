@@ -95,7 +95,8 @@ func (w worker) register(s *ephemeral.Store, r Receipt) error {
 	}
 	d, err := s.Describe(w.id())
 	if errors.Is(err, ephemeral.ErrMissing) {
-		return s.Start(w.id(), w.Mode, 1, w.id(), b, attrs)
+		_, err = s.StartOnce(w.id(), w.Mode, 1, w.id(), b, attrs)
+		return err
 	}
 	if err != nil {
 		return err
@@ -148,7 +149,7 @@ func Run(ctx context.Context, c Config, r Receipt) (Receipt, error) {
 	for _, state := range []string{"ready", "pending", "leased", "timer"} {
 		after := ""
 		for {
-			ids, e := s.List(state, after, 100)
+			ids, e := s.FindInState("binding", w.binding(), state, after, 100)
 			if e != nil {
 				return Receipt{}, e
 			}

@@ -70,6 +70,12 @@ func onboard(ctx context.Context, home, origin string, watch bool) error {
 	if h.Origin != origin {
 		return errors.New("paired profile belongs to another workspace")
 	}
+	if watch {
+		child, cancel := context.WithCancel(ctx)
+		done := make(chan struct{})
+		go func() { defer close(done); probeHost(child, h) }()
+		defer func() { cancel(); <-done }()
+	}
 	for ctx.Err() == nil {
 		b, err := request(ctx, h, "onboarding/work", struct{}{})
 		if err != nil {

@@ -62,7 +62,7 @@ func (s *server) connect(w http.ResponseWriter, r *http.Request) (any, error) {
 		return nil, e
 	}
 	var p sql.NullString
-	e := s.db.QueryRow("SELECT principal FROM owner").Scan(&p)
+	e := s.store.Reader().QueryRow("SELECT principal FROM owner").Scan(&p)
 	intent := "login"
 	if errors.Is(e, sql.ErrNoRows) {
 		if !s.setupCode(q.Code) {
@@ -192,7 +192,7 @@ func (s *server) callback(w http.ResponseWriter, r *http.Request) (any, error) {
 		return nil, e
 	}
 	var matches int
-	if e = s.db.QueryRow("SELECT count(*) FROM owner WHERE principal=?", p).Scan(&matches); e != nil {
+	if e = s.store.Reader().QueryRow("SELECT count(*) FROM owner WHERE principal=?", p).Scan(&matches); e != nil {
 		return nil, e
 	}
 	if matches != 1 {

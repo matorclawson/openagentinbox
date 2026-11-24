@@ -21,8 +21,16 @@ INSERT OR IGNORE INTO addresses SELECT name,name,1 FROM agents WHERE name NOT IN
 
 func (s *server) mailboxIdentity(box string) (any, error) {
 	var id, name string
-	err := s.db.QueryRow("SELECT id,address FROM mailbox_ids JOIN addresses USING(box) WHERE box=? AND current=1", box).Scan(&id, &name)
-	return object{"mailbox_id": id, "name": name, "original_address": box}, err
+	err := s.store.Reader().QueryRow("SELECT id,address FROM mailbox_ids JOIN addresses USING(box) WHERE box=? AND current=1", box).Scan(&id, &name)
+	result := object{"mailbox_id": id, "name": name, "original_address": box}
+	if domain := s.primaryDomain(); err == nil && domain != "" {
+		if !validEmail(name + "@" + domain) {
+			name = "agent+" + id
+		}
+		result["email_address"] = name + "@" + domain
+		result["external_send_enabled"] = s.maySend(box)
+	}
+	return result, err
 }
 
 type addressMove struct{ From, To string }

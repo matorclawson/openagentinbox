@@ -186,10 +186,25 @@ func listen(ctx context.Context, path string, p profile, wake func(string, *os.F
 	return locked(path+".notify.listener", false, func() error {
 		delay := time.Second
 		pending := false
+		var checked time.Time
+		lastMode := ""
+		occupied := false
 		for ctx.Err() == nil {
 			var s noticeState
 			if e := stateAt(path, func(v *noticeState) error { s = *v; return nil }); e != nil {
 				return e
+			}
+			mode := s.Mode
+			if mode == "focus" && s.Until <= time.Now().Unix() {
+				mode = "available"
+			}
+			if occupied && mode == "available" {
+				mode = "busy"
+			}
+			if mode != lastMode || time.Since(checked) >= time.Minute {
+				lastMode = mode
+				checked = time.Now()
+				_, _ = request(ctx, p, "listener", map[string]string{"mode": mode})
 			}
 			// Suppressed mail stays on the server. Recheck preferences locally without
 			// issuing a hot sequence of watch requests against an old cursor.
@@ -211,7 +226,8 @@ func listen(ctx context.Context, path string, p profile, wake func(string, *os.F
 				e = lockedFile(path+".notify.turn", false, func(lease *os.File) error {
 					return deliver(ctx, path, p, func(msg string) error { return wake(msg, lease) })
 				})
-				if errors.Is(e, errOccupied) {
+				occupied = errors.Is(e, errOccupied)
+				if occupied {
 					pause(ctx, 3*time.Second)
 					continue
 				}

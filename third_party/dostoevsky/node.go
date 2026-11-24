@@ -22,6 +22,7 @@ var (
 	ErrLimit    = errors.New("size limit exceeded")
 	ErrClosed   = errors.New("node closed")
 	ErrConflict = errors.New("checkpoint or message ID conflict")
+	ErrExpired  = errors.New("offset expired by retention")
 	ErrEmpty    = errors.New("offset at end of log")
 )
 
@@ -63,19 +64,84 @@ type checkpoint struct {
 	Position
 }
 type stream struct {
+	base    int64
+	firstID string
+	first   location
+	tail    *recordTail
+	groups  map[string]Position
+	wait    *streamWait
+}
+
+type recordTail struct {
 	records []location
 	ids     map[string]int64
-	groups  map[string]Position
+}
+
+type streamWait struct {
 	changed chan struct{}
+	waiters int
+}
+
+func (s *stream) count() int64 {
+	if s.first.size == 0 {
+		return 0
+	}
+	if s.tail == nil {
+		return 1
+	}
+	return 1 + int64(len(s.tail.records))
+}
+
+func (s *stream) location(index int64) location {
+	if index == 0 {
+		return s.first
+	}
+	return s.tail.records[index-1]
+}
+
+func (s *stream) addRecord(r *Record, loc location) {
+	if s.first.size == 0 {
+		s.first, s.firstID = loc, r.ID
+		return
+	}
+	if s.tail == nil {
+		s.tail = &recordTail{}
+	}
+	s.tail.records = append(s.tail.records, loc)
+	if r.ID != "" {
+		if s.tail.ids == nil {
+			s.tail.ids = make(map[string]int64)
+		}
+		s.tail.ids[r.ID] = r.Offset
+	}
+}
+
+func (s *stream) lookupID(id string) (int64, bool) {
+	if id != "" && id == s.firstID {
+		return s.base, true
+	}
+	if s.tail == nil {
+		return 0, false
+	}
+	off, ok := s.tail.ids[id]
+	return off, ok
+}
+
+func (s *stream) signal() {
+	if s.wait != nil && s.wait.changed != nil {
+		close(s.wait.changed)
+		s.wait.changed = nil
+	}
 }
 
 type Node struct {
-	mu       sync.Mutex
-	j        *journal
-	cfg      Config
-	topology string
-	streams  map[Partition]*stream
-	closed   bool
+	publishes publishQueue
+	mu        sync.RWMutex
+	j         *journal
+	cfg       Config
+	topology  string
+	streams   map[Partition]*stream
+	closed    bool
 }
 
 func (c Config) validate() error {
@@ -90,7 +156,7 @@ func (c Config) validate() error {
 		return ErrInvalid
 	}
 	for t, n := range c.Topics {
-		if !name.MatchString(t) || n < 1 || n > 65536 {
+		if !(name.MatchString(t) || t == "*" && len(c.Topics) == 1) || n < 1 || n > 65536 {
 			return ErrInvalid
 		}
 	}
@@ -142,7 +208,7 @@ func Open(dir string, c Config) (*Node, error) {
 		_, e = j.append(entry{Config: &own})
 	}
 	if e != nil {
-		j.file.Close()
+		j.close()
 		return nil, e
 	}
 	return n, nil
@@ -156,21 +222,42 @@ func (n *Node) Close() error {
 	}
 	n.closed = true
 	for _, s := range n.streams {
-		close(s.changed)
+		s.signal()
 	}
-	return n.j.file.Close()
+	return n.j.close()
 }
 func (n *Node) owner(p Partition) (string, error) {
-	count := n.cfg.Topics[p.Topic]
+	count := n.partitionCount(p.Topic)
 	if p.Number < 0 || p.Number >= count {
 		return "", ErrInvalid
 	}
-	return n.cfg.Nodes[p.Number%len(n.cfg.Nodes)], nil
+	if len(n.cfg.Nodes) == 1 {
+		return n.cfg.Nodes[0], nil
+	}
+	slot := uint64(p.Number)
+	if n.cfg.Topics["*"] > 0 {
+		h := fnv.New32a()
+		h.Write([]byte(p.Topic))
+		slot += uint64(h.Sum32())
+	}
+	return n.cfg.Nodes[slot%uint64(len(n.cfg.Nodes))], nil
+}
+func (n *Node) partitionCount(t string) int {
+	if count := n.cfg.Topics["*"]; count > 0 {
+		if name.MatchString(t) {
+			return count
+		}
+		return 0
+	}
+	return n.cfg.Topics[t]
 }
 func (n *Node) partition(t, key string) (Partition, error) {
-	c := n.cfg.Topics[t]
+	c := n.partitionCount(t)
 	if c == 0 {
 		return Partition{}, ErrInvalid
+	}
+	if c == 1 {
+		return Partition{t, 0}, nil
 	}
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(key))
@@ -189,26 +276,34 @@ func (n *Node) stream(p Partition) (*stream, error) {
 	}
 	s := n.streams[p]
 	if s == nil {
-		s = &stream{ids: map[string]int64{}, groups: map[string]Position{}, changed: make(chan struct{})}
+		s = &stream{}
 		n.streams[p] = s
 	}
 	return s, nil
 }
 func (n *Node) index(e entry, loc location) error {
+	if seed := e.Seed; seed != nil {
+		s, err := n.stream(seed.Partition)
+		if err != nil {
+			return err
+		}
+		if s.base != 0 || s.count() != 0 || len(s.groups) != 0 || seed.Base < 0 {
+			return ErrConflict
+		}
+		s.base = seed.Base
+		s.groups = seed.Groups
+		return nil
+	}
 	if r := e.Record; r != nil {
 		s, err := n.stream(r.Partition)
 		if err != nil {
 			return err
 		}
-		if r.Offset != int64(len(s.records)) {
+		if r.Offset != s.base+s.count() {
 			return ErrConflict
 		}
-		s.records = append(s.records, loc)
-		if r.ID != "" {
-			s.ids[r.ID] = r.Offset
-		}
-		close(s.changed)
-		s.changed = make(chan struct{})
+		s.addRecord(r, loc)
+		s.signal()
 		return nil
 	}
 	if c := e.Check; c != nil {
@@ -220,8 +315,11 @@ func (n *Node) index(e entry, loc location) error {
 		if c.Expected != nil {
 			expected = *c.Expected
 		}
-		if expected != s.groups[c.Group].Next || c.Next <= expected || c.Next > int64(len(s.records)) {
+		if expected != s.groups[c.Group].Next || c.Next <= expected || c.Next > s.base+s.count() {
 			return ErrConflict
+		}
+		if s.groups == nil {
+			s.groups = make(map[string]Position)
 		}
 		s.groups[c.Group] = Position{c.Next, bytes.Clone(c.State)}
 		return nil
@@ -241,17 +339,20 @@ func (n *Node) Publish(ctx context.Context, t string, m Message) (Record, error)
 	if !validText(m.ID, m.Key) {
 		return Record{}, ErrInvalid
 	}
-	n.mu.Lock()
-	defer n.mu.Unlock()
+	return n.schedulePublish(ctx, p, m)
+}
+
+// publishLocked writes one record under the node lock.
+func (n *Node) publishLocked(ctx context.Context, p Partition, m Message) (Record, error) {
+	if e := ctx.Err(); e != nil {
+		return Record{}, e
+	}
 	s, e := n.stream(p)
 	if e != nil {
 		return Record{}, e
 	}
-	if e = ctx.Err(); e != nil {
-		return Record{}, e
-	}
-	if off, ok := s.ids[m.ID]; m.ID != "" && ok {
-		ev, e := n.j.read(s.records[off])
+	if off, ok := s.lookupID(m.ID); m.ID != "" && ok {
+		ev, e := n.j.read(s.location(off - s.base))
 		if e != nil {
 			return Record{}, e
 		}
@@ -261,11 +362,12 @@ func (n *Node) Publish(ctx context.Context, t string, m Message) (Record, error)
 		}
 		return *r, nil
 	}
-	r := Record{Partition: p, Message: m, Offset: int64(len(s.records)), Time: time.Now().UTC()}
+	r := Record{Partition: p, Message: m, Offset: s.base + s.count(), Time: time.Now().UTC()}
 	ev := entry{Record: &r}
 	loc, e := n.j.append(ev)
 	if e == nil {
-		e = n.index(ev, loc)
+		s.addRecord(&r, loc)
+		s.signal()
 	}
 	return r, e
 }
@@ -276,33 +378,71 @@ func (n *Node) Read(ctx context.Context, p Partition, offset int64, wait bool) (
 		return Record{}, ErrInvalid
 	}
 	for {
-		n.mu.Lock()
-		s, e := n.stream(p)
-		if e == nil {
-			e = ctx.Err()
+		if err := ctx.Err(); err != nil {
+			return Record{}, err
 		}
-		if e != nil {
-			n.mu.Unlock()
-			return Record{}, e
+		n.mu.RLock()
+		if n.closed {
+			n.mu.RUnlock()
+			return Record{}, ErrClosed
 		}
-		if offset < int64(len(s.records)) {
-			ev, e := n.j.read(s.records[offset])
-			n.mu.Unlock()
+		owner, e := n.owner(p)
+		if e != nil || owner != n.cfg.Node {
+			n.mu.RUnlock()
+			if e != nil {
+				return Record{}, e
+			}
+			return Record{}, ErrOwner
+		}
+		s := n.streams[p]
+		if s != nil && offset < s.base {
+			n.mu.RUnlock()
+			return Record{}, ErrExpired
+		}
+		if s != nil && offset < s.base+s.count() {
+			ev, e := n.j.read(s.location(offset - s.base))
+			n.mu.RUnlock()
 			if e != nil {
 				return Record{}, e
 			}
 			return *ev.Record, nil
 		}
-		ch := s.changed
-		n.mu.Unlock()
+		n.mu.RUnlock()
 		if !wait {
 			return Record{}, ErrEmpty
 		}
+		n.mu.Lock()
+		s, e = n.stream(p)
+		if e != nil {
+			n.mu.Unlock()
+			return Record{}, e
+		}
+		if offset < s.base+s.count() {
+			n.mu.Unlock()
+			continue
+		}
+		if s.wait == nil {
+			s.wait = &streamWait{}
+		}
+		if s.wait.changed == nil {
+			s.wait.changed = make(chan struct{})
+		}
+		ch := s.wait.changed
+		s.wait.waiters++
+		n.mu.Unlock()
 		select {
 		case <-ctx.Done():
-			return Record{}, ctx.Err()
 		case <-ch:
 		}
+		n.mu.Lock()
+		s.wait.waiters--
+		if s.wait.waiters == 0 {
+			if s.count() == 0 && s.base == 0 && len(s.groups) == 0 {
+				delete(n.streams, p)
+			}
+			s.wait = nil
+		}
+		n.mu.Unlock()
 	}
 }
 func (n *Node) Position(ctx context.Context, p Partition, g string) (Position, error) {
@@ -314,6 +454,9 @@ func (n *Node) Position(ctx context.Context, p Partition, g string) (Position, e
 	s, e := n.stream(p)
 	if e != nil {
 		return Position{}, e
+	}
+	if s.count() == 0 && s.wait == nil && s.base == 0 && len(s.groups) == 0 {
+		delete(n.streams, p)
 	}
 	pos := s.groups[g]
 	pos.State = bytes.Clone(pos.State)
@@ -340,7 +483,10 @@ func (n *Node) CommitBatch(ctx context.Context, p Partition, g string, offset, n
 	if e = ctx.Err(); e != nil {
 		return e
 	}
-	if s.groups[g].Next != offset || next > int64(len(s.records)) {
+	if s.groups[g].Next != offset || next > s.base+s.count() {
+		if s.count() == 0 && s.wait == nil && s.base == 0 && len(s.groups) == 0 {
+			delete(n.streams, p)
+		}
 		return ErrConflict
 	}
 	ev := entry{Check: &checkpoint{Partition: p, Group: g, Position: Position{next, state}}}

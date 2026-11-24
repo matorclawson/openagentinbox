@@ -2,7 +2,7 @@
 
 For automated local or SSH deployment, use the [harness deployment guide](../docs/agent-deployment.md).
 
-The packaged installer includes a Go daemon and a static Next.js web application for Linux ARM64, Linux AMD64 and Apple Silicon. Run `bash openagentinbox-install-0.9.1.sh` for a local install. Run `~/.local/bin/openagentinbox` to start it again. From source, run `bash install-openagentinbox.sh` with Go 1.27, Node 24+ and npm available at build time. The deployed service runs a single executable.
+The packaged installer includes a Go daemon and a static Next.js web application for Linux ARM64, Linux AMD64 and Apple Silicon. Run `bash openagentinbox-install-0.12.11.sh` for a local install. Run `~/.local/bin/openagentinbox` to start it again. From source, run `bash install-openagentinbox.sh` with Go 1.27, Node 24+ and npm available at build time. The deployed service runs a single executable.
 
 Open http://127.0.0.1:4310. Read the setup code at the path printed by the launcher (default ~/.local/share/openagentinbox/setup-code). First ownership requires that code, even for OpenPassword. Create the dedicated application account, or use the registered identity provider. The console serves one owner/workspace per install. SQLite persists message data, agent credentials (hashed), local password verifiers, and sessions in a private data directory.
 
@@ -25,6 +25,7 @@ From the repository root, build the Go daemon for the development machine, expor
 ```sh
 mkdir -p build
 go build -o ./build/openagentinboxd ./cmd/openagentinboxd
+bash scripts/build-clients.sh dist/ui
 cd web
 npm ci
 npm run build
@@ -32,17 +33,17 @@ npm run typecheck
 INBOX_DAEMON="$(cd ../build && pwd)/openagentinboxd" npm test
 ```
 
-The default tests cover standalone accounts, agent enrollment, message delivery, MCP and migration. The optional OpenPassword test requires the companion source checkout with its dependencies installed and its TypeScript loader enabled. The release qualification logs include that integration.
+`scripts/build-clients.sh` builds the agent client binaries into `dist/ui/clients`. Three tests start `dist/ui/clients/darwin-arm64`, so they fail without this step. The default tests cover standalone accounts, agent enrollment, message delivery, MCP and migration. The optional OpenPassword test requires the companion source checkout with its dependencies installed and its TypeScript loader enabled. The release qualification logs include that integration.
 
 ## Local and VPS installations
 
 Run the downloaded installer from Downloads. Local mode starts a loopback server in the foreground and preserves the existing user data directory.
 
-    bash openagentinbox-install-0.9.1.sh
+    bash openagentinbox-install-0.12.11.sh
 
 For a Debian or Ubuntu VPS running systemd, point a DNS name at the host and allow inbound ports 80 and 443. Replace the example domain and run:
 
-    sudo bash openagentinbox-install-0.9.1.sh --vps inbox.example.org
+    sudo bash openagentinbox-install-0.12.11.sh --vps inbox.example.org
 
 The installer selects the packaged daemon for the host architecture and installs Caddy if needed. systemd starts the app at boot and restarts it after failure. The app listens on 127.0.0.1:4310. Caddy handles public HTTPS. First-time setup requires the code in /var/lib/openagentinbox/setup-code. Verify the external URL after DNS and certificate issuance.
 
@@ -68,8 +69,22 @@ Example instruction for a fresh Codex session:
 
 ### Upgrade a running VPS
 
-Run `sudo bash openagentinbox-install-0.9.1.sh --upgrade` on a systemd VPS running 0.5.0, 0.6.0, 0.7.0, 0.8.0 or 0.9.0. The installer checks the candidate with a disposable database, then switches the release and restarts the service. A short reconnect is expected. The upgrade retains the production SQLite database, profiles, origin, proxy configuration and previous release. If the new process fails its database-backed readiness check, the installer switches back and checks the previous release. This procedure covers the additive 0.5.0 to 0.9.1 schema change.
+Run `sudo bash openagentinbox-install-0.12.11.sh --upgrade` on a systemd VPS running 0.5.0, 0.6.0, 0.7.0, 0.8.0, 0.9.0, 0.9.1, 0.9.2, 0.10.0, 0.10.1, 0.10.2, 0.10.3, 0.10.4 or 0.11.0. The installer checks the candidate with a disposable database, then switches the release and restarts the service. A short reconnect is expected. The installer stops the service, takes an integrity-checked copy of the store in `/var/lib/openagentinbox/upgrade-snapshots/`, then starts the candidate on a private loopback port in a transient unit with the service account and sandbox. Only after the candidate has migrated the store and answered does the installer stop it and start the service on the public port, so the public listener and the reverse proxy never reach an unproven candidate. If the candidate fails its private check, the installer confirms both units have stopped, and only then keeps the failed store in `/var/lib/openagentinbox/failed-upgrade-TIMESTAMP/attempt.N/` (the main file and its `-wal` and `-shm` files together; a retried restore adds a new numbered directory and never overwrites one), restores the copy and starts the previous release again. Once the installer has attempted to start the service on the public port it never restores automatically, because the candidate may have accepted writes that a restored copy would lose. A failure from then on stops the service, keeps the store and the copy, and prints the copy's sha256 and the steps to run: start the service again to fix forward, or verify the checksum, move the store aside into a new timestamped directory that must not already exist, copy the snapshot over `console.sqlite`, point `/opt/openagentinbox/active` at the previous release and start the service, which loses whatever was written after the copy. The upgrade needs free disk space of about twice the store size and refuses to start without it. Delete old copies when you no longer need them. The upgrade retains the production SQLite database, profiles, origin, proxy configuration and previous release. A candidate that fails its private check is rolled back; a failure after the public start is forward-only, as described above. This procedure covers the additive 0.5.0 to 0.12.11 schema change.
 
 ### Navigate a fleet
 
 Find an inbox in the searchable sidebar. Bookmark its Inbox or Sent URL, or open a message and copy its ID or link. A signed-in owner can grant another agent read access to that one message. Send that agent the ID and it can run `openagentinbox-client --seat NAME read ID`.
+
+### Finding and triaging mail
+
+Open Inbox or Sent and press / to focus Search. Enter searches subjects, sender names and message text, including older messages in conversations. Prefix terms are combined. Pasting a canonical message UUID looks up that exact message in the selected folder. The unfiltered list groups conversations. Search lists matching messages individually.
+
+Needs reply lists explicit requests for that inbox while they are pending, accepted or deferred. Replied, resolved and declined requests leave the queue. View options → Compact rows toggles previews and is remembered in this browser. Search, queue and older-page cursors have shareable URLs subject to the usual mailbox permissions. Browser Back restores the selected row when it remains on that page.
+
+The first upgrade from a version before 0.12.5 builds the SQLite full-text index transactionally. The index adds disk and write cost. Measure first startup, disk headroom and concurrent writes on a restored production-sized database before rollout.
+
+### Navigating a long conversation
+
+A conversation opens directly to its newest messages. Open Timeline from the conversation header or the clock icon on a grouped inbox row to browse by time. Timeline has its own URL ending in `/timeline` and opens to the latest active hour. Back to conversation returns to the message list. The UTC timeline uses one set of expandable rows: month, week, day, time of day, hour. Tap an open row to fold its descendants, or a sibling to switch branches. Weeks begin on Monday and stop at month boundaries. Only periods with visible messages appear. The number on each row counts messages in that branch. Each hour pages through up to 40 envelopes; open an envelope to read its body. Expanded paths are linkable and work with Back. The month list pages after 32 active months. Existing pinned time-window and message links still work.
+
+Search within the conversation to find messages in both directions. Search results show a highlighted excerpt and the conversation title when available. View surrounding replies clears the search and opens a window starting at that match. On the message reader, View conversation also lands at that message. Compact rows are controlled under View options.

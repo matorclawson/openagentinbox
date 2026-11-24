@@ -175,7 +175,7 @@ func (s *server) seatAuthorization(_ http.ResponseWriter, r *http.Request) (any,
 	}
 	var owner, host, name, id, grantID, hostID string
 	var issued, verified, expires int64
-	err = s.db.QueryRowContext(r.Context(), `SELECT o.id,c.id,o.owner,c.label,o.name,o.mailbox,o.issued,o.verified,o.expires
+	err = s.store.Reader().QueryRowContext(r.Context(), `SELECT o.id,c.id,o.owner,c.label,o.name,o.mailbox,o.issued,o.verified,o.expires
  FROM onboarding o JOIN paired_cli c ON c.id=o.host JOIN mailbox_ids i ON i.id=o.mailbox JOIN addresses a ON a.box=i.box AND a.current=1 AND a.address=o.name
  WHERE i.box=? ORDER BY o.issued DESC LIMIT 1`, box).Scan(&grantID, &hostID, &owner, &host, &name, &id, &issued, &verified, &expires)
 	return object{"authorization_id": grantID, "paired_client_id": hostID, "authorized_by": owner, "host": host, "name": name, "mailbox_id": id, "issued_at": issued, "expires_at": expires, "verified_at": verified, "scope": "native CLI enrollment and inbox access verification"}, err

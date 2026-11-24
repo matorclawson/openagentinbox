@@ -84,7 +84,7 @@ func (m *Mesh) execute(ctx context.Context, q request) (reply, error) {
 	}
 }
 
-var protocolErrors = []error{ErrInvalid, ErrOwner, ErrLimit, ErrClosed, ErrConflict, ErrEmpty, context.DeadlineExceeded, context.Canceled}
+var protocolErrors = []error{ErrInvalid, ErrOwner, ErrLimit, ErrClosed, ErrConflict, ErrEmpty, ErrExpired, context.DeadlineExceeded, context.Canceled}
 
 func (m *Mesh) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != PeerPath {

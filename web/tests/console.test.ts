@@ -97,7 +97,7 @@ test("setup, idempotent conversations, agent isolation, revocation and restart",
           headers: auth,
         })
       ).statusCode,
-      404,
+      200, // The sender can read its own Sent message.
     );
     await a.close();
     a = await service({ dir, origin });
@@ -316,13 +316,13 @@ test("MCP uses the enrolled identity, the HTTP mailbox and the same retry key", 
  const token=agent.credential;
  const rpc=(method:string,params:object={},credential=token)=>a.inject({method:"POST",url:"/mcp",headers:{authorization:"Bearer "+credential},payload:{jsonrpc:"2.0",id:1,method,params}});
  assert.equal((await rpc("tools/list",{},"bogus")).statusCode,401);
- assert.deepEqual((await rpc("tools/list")).json().result.tools.map((t:{name:string})=>t.name),["whoami","inbox","read","send"]);
+ assert.deepEqual((await rpc("tools/list")).json().result.tools.map((t:{name:string})=>t.name),["whoami","inbox","sent","threads","read","send","receipt","request","alerts"]);
  const msg={to:"operator",subject:"MCP report",body:"One copy",key:randomUUID()};
  const sent=(await rpc("tools/call",{name:"send",arguments:msg})).json().result;assert.equal(sent.isError,false);
  const id=JSON.parse(sent.content[0].text).id;
  assert.equal((await a.inject({method:"POST",url:"/api/agent/send",headers:{authorization:"Bearer "+token},payload:msg})).json().id,id);
  const rows=(await a.inject({url:"/api/desk/list",headers:{cookie:owner}})).json().rows;assert.deepEqual(rows.map((m:{id:string})=>m.id),[id]);
- assert.equal((await rpc("tools/call",{name:"read",arguments:{id}})).json().result.isError,true);
+ assert.equal((await rpc("tools/call",{name:"read",arguments:{id}})).json().result.isError,false);
  const incoming=(await post(a,"/api/desk/send",{...msg,to:"researcher"},owner)).json().id;
  const profile=join(dir,"agent.json");writeFileSync(profile,JSON.stringify({name:"researcher",token,origin:a.base}),{mode:0o600});
  const child=spawn(process.execPath,["out/openagentinbox.mjs","mcp"],{env:{...process.env,OPENAGENTINBOX_PROFILE:profile}});
@@ -332,4 +332,47 @@ test("MCP uses the enrolled identity, the HTTP mailbox and the same retry key", 
  const replies=output.trim().split("\n").map(x=>JSON.parse(x));assert.deepEqual(replies.map(q=>q.id),[1,2,3]);assert.equal(replies[0].result.protocolVersion,"2025-11-25");assert.equal(JSON.parse(replies[1].result.content[0].text).rows[0].id,incoming);assert.equal(JSON.parse(replies[2].result.content[0].text).body,msg.body);
  await post(a,"/api/desk/revoke",{name:"researcher"},owner);assert.equal((await rpc("tools/list")).statusCode,401);
  } finally {await a.close();rmSync(dir,{recursive:true});}
+});
+
+test("recipient detail records a first open, linked replies close the request atomically",async()=>{
+ const dir=fixture();const a=await service({dir,origin});
+ try{
+ const owner=cookie(await post(a,"/api/setup",{username:"owner",password:"temporary-password",code:readFileSync(join(dir,"setup-code"),"utf8")}));
+ const token=(await post(a,"/api/desk/agents",{name:"worker"},owner)).json().credential;
+ const headers={authorization:"Bearer "+token};
+ const original={to:"worker",subject:"Review",body:"Please review",key:randomUUID(),intent:"urgent"};
+ const msg=await post(a,"/api/desk/send",original,owner);assert.equal(msg.statusCode,200);const id=msg.json().id;
+ const audit=async()=>(await a.inject({url:"/api/desk/receipt/"+id,headers:{cookie:owner}})).json();
+ await a.inject({url:"/api/desk/message/"+id,headers:{cookie:owner}});
+ await a.inject({url:"/api/agent/inbox",headers});
+ let r=await audit();assert.equal(r.opened,0);assert.equal(r.state,"pending");assert.ok(Math.abs(r.due-Date.now()-120000)<5000);
+ await a.inject({url:"/api/agent/message/"+id,headers});const first=(await audit()).opened;assert.ok(first>0);
+ await a.inject({url:"/api/agent/message/"+id,headers});assert.equal((await audit()).opened,first);
+ const until=Date.now()+3600000;
+ for(const action of ["defer","accept"]){const res=await a.inject({url:"/api/agent/request",method:"POST",headers,payload:{action,id,until}});assert.equal(res.statusCode,200);assert.equal(res.json().due,until)}
+ const reply={to:"operator",subject:"Result",body:"Done",replyTo:id,key:randomUUID()};
+ const send=(payload:object)=>a.inject({url:"/api/agent/send",method:"POST",headers,payload});
+ assert.equal((await send({...reply,to:"worker"})).statusCode,400);
+ const sent=await send(reply);assert.equal(sent.statusCode,200);assert.equal((await send(reply)).json().id,sent.json().id);
+ r=await audit();assert.equal(r.state,"resolved");assert.ok(r.replied>=first);assert.equal(r.due,0);
+ assert.equal((await post(a,"/api/desk/send",{...original,intent:"request"},owner)).statusCode,409);
+ }finally{await a.close();rmSync(dir,{recursive:true})}
+});
+
+test("performance diagnostics count successful operations and keep concurrent opens idempotent",async()=>{
+ const dir=fixture(),a=await service({dir,origin});
+ try{
+  const owner=cookie(await post(a,"/api/setup",{username:"owner",password:"temporary-password",code:readFileSync(join(dir,"setup-code"),"utf8")}));
+  const {credential}=(await post(a,"/api/desk/agents",{name:"worker"},owner)).json();
+  const payload={to:"worker",key:randomUUID(),subject:"Review",body:"Read concurrently"};
+  const id=(await post(a,"/api/desk/send",payload,owner)).json().id;
+  await post(a,"/api/desk/send",payload,owner);
+  const get=()=>a.inject({url:"/api/agent/message/"+id,headers:{authorization:"Bearer "+credential}});
+  const opens=await Promise.all(Array.from({length:16},get));const stamp=opens[0].json().opened;
+  assert.ok(stamp>0);assert.ok(opens.every(r=>r.statusCode===200&&r.json().opened===stamp));
+  assert.equal((await a.inject({url:"/api/desk/performance"})).statusCode,401);
+  const stats=(await a.inject({url:"/api/desk/performance",headers:{cookie:owner}})).json();
+  assert.equal(stats.successful_sends.count,2);assert.equal(stats.successful_body_reads.count,16);
+  assert.equal(Math.round(stats.estimated_recipient_mailboxes),1);assert.ok(stats.successful_body_reads.p95_upper_ms>0);
+ }finally{await a.close();rmSync(dir,{recursive:true})}
 });

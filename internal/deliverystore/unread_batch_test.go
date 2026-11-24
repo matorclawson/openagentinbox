@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	dost "github.com/rodriveracom/openagentinbox/third_party/dostoevsky"
+	dost "github.com/rodriveracom/dostoevsky"
 )
 
 func TestSQLiteConsumerUsesSparseCursorsAndExactByteBudget(t *testing.T) {

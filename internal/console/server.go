@@ -39,6 +39,9 @@ func (f failure) Error() string { return f.msg }
 
 type handler func(http.ResponseWriter, *http.Request) (any, error)
 type server struct {
+	resolver                                                     dnsResolver
+	email                                                        *emailConfig
+	performance                                                  mailPerformance
 	trustedProxy                                                 string
 	live                                                         changes
 	peerLimit                                                    int
@@ -147,21 +150,24 @@ func Run() error {
 		return e
 	}
 	defer s.store.Close()
-	u := url.URL{Scheme: "file", Path: p, RawQuery: "_pragma=busy_timeout(5000)"}
-	s.db, e = sql.Open("sqlite", u.String())
-	if e != nil {
-		return e
-	}
-	defer s.db.Close()
-	s.db.SetMaxOpenConns(1)
-	if _, e = s.db.Exec(schema + liveSchema + pairSchema + addressSchema + onboardingSchema); e != nil {
+	s.db = s.store.Writer()
+	if _, e = s.db.Exec(schema + liveSchema + pairSchema + addressSchema + onboardingSchema + trackingSchema + emailSchema); e != nil {
 		return e
 	}
 	if e = s.store.UpgradeConsole(context.Background()); e != nil {
 		return e
 	}
+	if e = initThreads(s.db); e != nil {
+		return e
+	}
+	if _, e = s.db.Exec("CREATE INDEX IF NOT EXISTS message_sent_time ON messages(created_at,seq)"); e != nil {
+		return e
+	}
+	if e = initMailSearch(s.db); e != nil {
+		return e
+	}
 	var owners int
-	if e = s.db.QueryRow("SELECT count(*) FROM owner").Scan(&owners); e != nil {
+	if e = s.store.Reader().QueryRow("SELECT count(*) FROM owner").Scan(&owners); e != nil {
 		return e
 	}
 	if owners == 0 {
@@ -196,17 +202,17 @@ func Run() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		var n int
-		if err := s.db.QueryRowContext(r.Context(), "SELECT count(*) FROM owner").Scan(&n); err != nil {
+		if err := s.store.Reader().QueryRowContext(r.Context(), "SELECT count(*) FROM owner").Scan(&n); err != nil {
 			http.Error(w, "store unavailable", 503)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		json.NewEncoder(w).Encode(object{"product": "openagentinbox", "version": "0.9.1", "instance": instance, "setup": n == 0})
+		json.NewEncoder(w).Encode(object{"product": "openagentinbox", "version": "0.12.11", "instance": instance, "setup": n == 0})
 	})
 	s.live.draining = make(chan struct{})
 	s.routes(mux)
-	for _, route := range []string{"GET /inboxes/{seat}", "GET /inboxes/{seat}/sent", "GET /messages/{id}", "GET /agents", "GET /activity", "GET /compose"} {
+	for _, route := range []string{"GET /inboxes/{seat}", "GET /inboxes/{seat}/sent", "GET /messages/{id}", "GET /agents", "GET /activity", "GET /compose", "GET /mail-setup", "GET /settings", "GET /inboxes/{seat}/threads/{root}", "GET /inboxes/{seat}/threads/{root}/timeline"} {
 		mux.HandleFunc(route, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Cache-Control", "no-cache")
 			http.ServeFile(w, r, filepath.Join(ui, "index.html"))
@@ -221,6 +227,14 @@ func Run() error {
 	}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 65 * time.Second, IdleTimeout: 60 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	closeEmail, err := s.startEmail(ctx)
+	if err != nil {
+		return err
+	}
+	defer closeEmail()
+	workerDone := make(chan struct{})
+	go func() { defer close(workerDone); s.deliveryWorker(ctx) }()
+	defer func() { stop(); <-workerDone }()
 	done := make(chan struct{})
 	drained := make(chan struct{})
 	go func() {
@@ -290,6 +304,7 @@ func (s *server) routes(m *http.ServeMux) {
 	s.liveRoutes(add)
 	s.pairRoutes(add)
 	s.mailRoutes(add)
+	add("GET /api/desk/performance", func(_ http.ResponseWriter, _ *http.Request) (any, error) { return s.performance.snapshot(), nil })
 	s.enrollRoutes(add)
 }
 func (s *server) issue(w http.ResponseWriter, exp int64, delegation any) error {
@@ -305,7 +320,7 @@ func (s *server) issue(w http.ResponseWriter, exp int64, delegation any) error {
 }
 func (s *server) signed(r *http.Request) (bool, error) {
 	var d sql.NullString
-	e := s.db.QueryRowContext(r.Context(), "SELECT delegation FROM sessions WHERE key=? AND expires>?", hash(cookie(r, "oai_session")), now()).Scan(&d)
+	e := s.store.Reader().QueryRowContext(r.Context(), "SELECT delegation FROM sessions WHERE key=? AND expires>?", hash(cookie(r, "oai_session")), now()).Scan(&d)
 	if errors.Is(e, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -320,7 +335,7 @@ func (s *server) signed(r *http.Request) (bool, error) {
 func (s *server) session(_ http.ResponseWriter, r *http.Request) (any, error) {
 	var name string
 	var p sql.NullString
-	e := s.db.QueryRow("SELECT username,principal FROM owner").Scan(&name, &p)
+	e := s.store.Reader().QueryRow("SELECT username,principal FROM owner").Scan(&name, &p)
 	setup := errors.Is(e, sql.ErrNoRows)
 	if e != nil && !setup {
 		return nil, e
@@ -367,7 +382,7 @@ func (s *server) password(w http.ResponseWriter, r *http.Request) (any, error) {
 	}
 	var user string
 	var salt, pass sql.NullString
-	e := s.db.QueryRow("SELECT username,salt,password FROM owner").Scan(&user, &salt, &pass)
+	e := s.store.Reader().QueryRow("SELECT username,salt,password FROM owner").Scan(&user, &salt, &pass)
 	if e != nil && !errors.Is(e, sql.ErrNoRows) {
 		return nil, e
 	}

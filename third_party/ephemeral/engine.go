@@ -11,12 +11,16 @@ import (
 	"time"
 )
 
+const runnableStates = "state IN ('ready','timer','leased','pending','join_ready')"
+
 var schema = []string{
 	"PRAGMA journal_mode=WAL", "PRAGMA synchronous=FULL", "PRAGMA foreign_keys=ON",
 	`CREATE TABLE IF NOT EXISTS definitions(name TEXT,version INTEGER,spec TEXT NOT NULL,PRIMARY KEY(name,version))`,
 	`CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY,name TEXT,version INTEGER,queue TEXT,state TEXT,step INTEGER DEFAULT 0,attempt INTEGER DEFAULT 0,due INTEGER DEFAULT 0,token TEXT DEFAULT '',value TEXT,FOREIGN KEY(name,version) REFERENCES definitions)`,
+	`CREATE TABLE IF NOT EXISTS start_requests(run TEXT PRIMARY KEY REFERENCES runs, digest TEXT NOT NULL)`,
+	"CREATE INDEX IF NOT EXISTS runnable_due ON runs(queue,due,id) WHERE " + runnableStates,
 	`CREATE INDEX IF NOT EXISTS by_state ON runs(state,id)`,
-	`CREATE INDEX IF NOT EXISTS ready ON runs(queue,state,due,id)`,
+	`DROP INDEX IF EXISTS ready`,
 	`CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY,run TEXT REFERENCES runs,at INTEGER,kind TEXT,step INTEGER,data TEXT)`,
 	`CREATE INDEX IF NOT EXISTS timeline ON events(run,seq)`,
 	`CREATE TABLE IF NOT EXISTS attrs(run TEXT REFERENCES runs,k TEXT,v TEXT,PRIMARY KEY(run,k))`,
@@ -27,6 +31,7 @@ var schema = []string{
 }
 
 type Step struct {
+	RetryDelays   []int64           `json:"retry_delays_ms,omitempty"`
 	Label         string            `json:"label,omitempty"`
 	Next          string            `json:"next,omitempty"`
 	Field         string            `json:"field,omitempty"`
@@ -58,6 +63,16 @@ func (s *Store) Register(name string, version int, steps []Step) error {
 		return e
 	}
 	for _, x := range steps {
+		if len(x.RetryDelays) > 0 {
+			if x.Kind != "activity" || len(x.RetryDelays) != x.Attempts-1 || x.BackoffMillis != 0 {
+				return errors.New("retry_delays_ms needs one delay per retry and zero fixed backoff")
+			}
+			for _, d := range x.RetryDelays {
+				if d < 0 || d > 315360000000 {
+					return errors.New("retry delay outside supported range")
+				}
+			}
+		}
 		switch x.Kind {
 		case "activity", "signal":
 			if x.Name == "" {
@@ -104,18 +119,21 @@ func (s *Store) Start(id, name string, version int, queue string, input json.Raw
 	if id == "" || queue == "" || !json.Valid(input) {
 		return errors.New("id, queue and JSON input required")
 	}
-	return s.tx(func() error {
-		if e := s.exec("INSERT INTO runs(id,name,version,queue,state,value) VALUES(?,?,?,?,'new',?)", id, name, version, queue, string(input)); e != nil {
-			return e
-		}
-		if e := s.event(id, "WorkflowStarted", 0, string(input)); e != nil {
-			return e
-		}
-		if e := s.attributes(id, attrs); e != nil {
-			return e
-		}
-		return s.advance(id, 0, string(input))
-	})
+	return s.tx(func() error { return s.start(id, name, version, queue, input, attrs) })
+}
+
+func (s *Store) start(id, name string, version int, queue string, input json.RawMessage, attrs map[string]string) error {
+
+	if e := s.exec("INSERT INTO runs(id,name,version,queue,state,value) VALUES(?,?,?,?,'new',?)", id, name, version, queue, string(input)); e != nil {
+		return e
+	}
+	if e := s.event(id, "WorkflowStarted", 0, string(input)); e != nil {
+		return e
+	}
+	if e := s.attributes(id, attrs); e != nil {
+		return e
+	}
+	return s.advance(id, 0, string(input))
 }
 func (s *Store) attributes(id string, attrs map[string]string) error {
 	if len(attrs) == 0 {
@@ -168,6 +186,11 @@ func (s *Store) advance(id string, index int, value string) error {
 	if e != nil {
 		return e
 	}
+	return s.advanceRun(id, a, index, value)
+}
+
+func (s *Store) advanceRun(id string, a run, index int, value string) error {
+	var e error
 	for index < len(a.steps) {
 		x := a.steps[index]
 		state, kind, due := "ready", "ActivityScheduled", now()
@@ -261,7 +284,7 @@ func (s *Store) Signal(id, key, name string, value json.RawMessage) error {
 			if e = s.event(id, "SignalConsumed", a.step, key); e != nil {
 				return e
 			}
-			return s.advance(id, destination(a.steps, a.step, a.steps[a.step].Next), string(value))
+			return s.advanceRun(id, a, destination(a.steps, a.step, a.steps[a.step].Next), string(value))
 		}
 		return nil
 	})
@@ -272,17 +295,25 @@ func terminal(state string) bool {
 func (s *Store) Cancel(id string) error {
 	return s.tx(func() error { return s.cancelTree(id) })
 }
-func (s *Store) retry(id string, a run, reason string) error {
+func (s *Store) retry(id string, a run, reason string, permanent bool) error {
 	state := "ready"
 	kind := "RetryScheduled"
-	if a.attempt >= max(1, a.steps[a.step].Attempts) {
+	due := int64(0)
+	step := a.steps[a.step]
+	if permanent || a.attempt >= max(1, step.Attempts) {
 		state = "failed"
 		kind = "WorkflowFailed"
+	} else {
+		delay := step.BackoffMillis
+		if len(step.RetryDelays) > 0 {
+			delay = step.RetryDelays[a.attempt-1]
+		}
+		due = now() + delay
 	}
 	if e := s.event(id, kind, a.step, reason); e != nil {
 		return e
 	}
-	if e := s.exec("UPDATE runs SET state=?,due=?,token='' WHERE id=?", state, now()+a.steps[a.step].BackoffMillis, id); e != nil {
+	if e := s.exec("UPDATE runs SET state=?,due=?,token='' WHERE id=?", state, due, id); e != nil {
 		return e
 	}
 	if state == "failed" {
@@ -296,10 +327,14 @@ func (s *Store) Poll(queue string, lease time.Duration) (*Task, error) {
 	if lease.Milliseconds() < 1 {
 		return nil, errors.New("lease must be at least 1ms")
 	}
+	due, ok, err := s.NextDue(queue)
+	if err != nil || !ok || due > now() {
+		return nil, err
+	}
 	var task *Task
 	e := s.tx(func() error {
 		for i := 0; i < 32; i++ {
-			r, e := s.query("SELECT id FROM runs WHERE queue=? AND state IN ('ready','timer','leased','pending','join_ready') AND due<=? ORDER BY due,id LIMIT 1", queue, now())
+			r, e := s.query("SELECT id FROM runs WHERE queue=? AND "+runnableStates+" AND due<=? ORDER BY due,id LIMIT 1", queue, now())
 			if e != nil || len(r) == 0 {
 				return e
 			}
@@ -310,16 +345,16 @@ func (s *Store) Poll(queue string, lease time.Duration) (*Task, error) {
 			}
 			switch a.state {
 			case "pending":
-				e = s.advance(id, 0, a.value)
+				e = s.advanceRun(id, a, 0, a.value)
 			case "join_ready":
 				e = s.join(id, a)
 			case "timer":
 				if e = s.event(id, "TimerFired", a.step, ""); e == nil {
-					e = s.advance(id, destination(a.steps, a.step, a.steps[a.step].Next), a.value)
+					e = s.advanceRun(id, a, destination(a.steps, a.step, a.steps[a.step].Next), a.value)
 				}
 			case "leased":
 				if e = s.event(id, "ActivityTimedOut", a.step, ""); e == nil {
-					e = s.retry(id, a, "lease expired")
+					e = s.retry(id, a, "lease expired", false)
 				}
 			default:
 				b := make([]byte, 16)
@@ -345,6 +380,17 @@ func (s *Store) Poll(queue string, lease time.Duration) (*Task, error) {
 	return task, nil
 }
 func (s *Store) Finish(id, token string, value json.RawMessage, failure string) error {
+	return s.finish(id, token, value, failure, false)
+}
+
+// FailPermanent closes the run immediately when another attempt cannot succeed.
+func (s *Store) FailPermanent(id, token, reason string) error {
+	if reason == "" {
+		return errors.New("failure reason required")
+	}
+	return s.finish(id, token, nil, reason, true)
+}
+func (s *Store) finish(id, token string, value json.RawMessage, failure string, permanent bool) error {
 	return s.tx(func() error {
 		a, e := s.run(id)
 		if e != nil {
@@ -357,7 +403,7 @@ func (s *Store) Finish(id, token string, value json.RawMessage, failure string) 
 			if e = s.event(id, "ActivityFailed", a.step, failure); e != nil {
 				return e
 			}
-			return s.retry(id, a, failure)
+			return s.retry(id, a, failure, permanent)
 		}
 		if !json.Valid(value) {
 			return errors.New("invalid JSON result")
@@ -365,7 +411,7 @@ func (s *Store) Finish(id, token string, value json.RawMessage, failure string) 
 		if e = s.event(id, "ActivityCompleted", a.step, string(value)); e != nil {
 			return e
 		}
-		return s.advance(id, destination(a.steps, a.step, a.steps[a.step].Next), string(value))
+		return s.advanceRun(id, a, destination(a.steps, a.step, a.steps[a.step].Next), string(value))
 	})
 }
 

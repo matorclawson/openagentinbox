@@ -1,6 +1,83 @@
 # Changelog
 
+## [0.12.11] - 2026-11-23
+
+Cumulative council return since 0.10.4 (application 38164e1, documentation a539500), replayed onto main.
+
+### Added
+- `tests/upgrade-rollback.sh` proves the in-place upgrade rolls back: a candidate that cannot start is refused by the preflight with the service untouched, and a candidate that fails its private check against the real store, after it has migrated it, leaves the previous release serving with its data and owner login. Once the installer has attempted to start the service on the public port, a failure is never rolled back automatically: the installer stops the service, keeps the store and the pre-upgrade copy, and prints the manual restore steps, which verify the copy's sha256 and archive the store to a new directory each run. The stop proof reads the unit's process list, and each failed-store archive keeps a store with its own `-wal` and `-shm` files in one `attempt.N` directory that a retried restore never overwrites. The harness covers both, and an accepted-write variant.
+- 0.11.0: opt-in Internet addresses, inbound LMTP, original MIME retrieval, external sender provenance, linked replies and single-file attachments. SQLite commits per-recipient outbound intent with the message; the relay worker tracks retries, permanent failures, uncertain handoffs and delivery reports. Per-mailbox permission and quota govern external sends.
+- 0.12.0: owner domain setup in the UI and API, DNS guidance and ownership verification, default addresses, aliases with collision checks, sender controls and an edge setup helper. Indexed conversation membership with Inbox and Sent views and historical backfill.
+- 0.12.1: grouped linked replies, recipient receipts, relative times and directly addressable conversations.
+- 0.12.5: scoped full-text and exact-ID search, individual outstanding requests, compact rows and return-to-list navigation. Existing bodies are indexed on first startup.
+- 0.12.6: bounded navigation through long threads, matched excerpts, message anchors and surrounding replies.
+- 0.12.7: UTC time navigation and time-bucket queries for large conversations.
+- 0.12.4: appearance preferences, a dark theme and the installed version in Settings.
+- 0.12.2: corpus-shaped load replay.
+
+### Changed
+- `--upgrade` takes an integrity-checked copy of the store while the service is stopped, and a failed start restores that copy together with the previous release. The candidate first runs against the real store on a private loopback port, so it accepts no public writes until it has migrated the store and answered. The check runs without the mail transport and escalation mailbox and listens only on loopback, with its port set so that no environment file can override it. The installer moves or restores store files only after confirming both units stopped, never leaves the store absent while restoring, verifies the copy by checksum before and after, and keeps the newest three pre-upgrade copies. The failed store is kept. `openagentinboxd snapshot DATABASE NEW-FILE` writes such a copy of any live store.
+- Mail setup queries DNS only when the owner presses Check DNS. Selecting a domain makes no lookup. Activating receiving checks the mail edge first, then looks up only the ownership record.
+- The vendored Ephemeral is the released 0.3.0 (upstream commit c250ba20, with its MIT LICENSE) in place of the candidate. Its idempotent-start request fingerprint format differs from the candidate.
+- 0.11.0: portable Ephemeral updated to the 0.3.0 candidate for idempotent backup starts and indexed recovery.
+- 0.12.2: subjects stay readable when agents embed envelope fields in the body; the opposite-folder thread lookup uses the existing index.
+- 0.12.3: shared brand tokens, typography and Mator artwork in the web desk.
+- 0.12.4: refined sender avatars and reader controls.
+- 0.12.8: activity plots replaced with touch-sized period selectors.
+- 0.12.9: one expandable month, week, day, daypart and hour outline with linkable selections and bounded hour pages.
+- 0.12.10: separated linked inbox identity, subject, per-direction counts and refresh; narrow-screen checks for long names and nine-digit counts.
+- 0.12.11: the outline moved to its own Timeline route; a conversation opens on its newest messages; Inbox and Sent link to Timeline from grouped rows.
+
+### Fixed
+- 0.12.0: permission refresh in Compose.
+- 0.12.2: the last scheduled event in a replay window.
+
+### Known issues
+- Dostoevsky stays at the 0.10.4 pin.
+- Public DNS, end-to-end Internet deliverability, native ARM64 resource use and physical-phone use have no production acceptance evidence yet; Internet email stays opt-in and off until accepted.
+
 All notable changes to OpenAgentInbox. Versions follow [Semantic Versioning](https://semver.org/). Starting with 0.9.1, each release is tagged `vX.Y.Z` on `main` when its pull request merges, and a GitHub release carries the installer and SHA256SUMS. Versions 0.4.0 to 0.9.0 were delivered as council builds and are recorded here, but not tagged.
+
+## [0.10.4] - 2026-11-23
+
+Candidate. Not yet deployed. Native ARM64 performance and the production systemd upgrade are still to be verified.
+
+### Changed
+- Integrates the post-0.3.0 Dostoevsky handoff (pinned locally as v0.3.0-rc.3): Linux journal data sync with a full-sync fallback, reusable journal encoding storage and a repeated-retention fix. The embedded copy is temporary; see Known issues.
+- Preserves existing bundled web dependency versions.
+
+### Known issues
+- `third_party/dostoevsky` is a vendored pre-review copy that lacks upstream's later data-loss fixes. Do not deploy this build to production. The vendored copy and the `replace` in `go.mod` are removed once Dostoevsky v0.4.0 is tagged.
+
+## [0.10.3] - 2026-11-23
+
+### Changed
+- Updates to Dostoevsky's concurrent-publishing candidate, locally pinned as v0.3.0-rc.2. SQLite still commits the message, delivery and retry records together.
+
+## [0.10.2] - 2026-11-23
+
+### Changed
+- Notification cursors, workspace activity and other standalone reads use reader connections.
+- Idle deadline checks inspect the deadline index before taking the writer.
+- SQLite page-cache targets are 4 MiB for the writer and 1 MiB per reader.
+
+## [0.10.1] - 2026-11-23
+
+### Changed
+- Overlapping sends can share a SQLite commit. The first send starts immediately.
+- The console and store share one writer, and common reads use committed reader snapshots.
+- Bounded Dostoevsky histograms and HyperLogLog expose handler latency and estimated distinct recipient counts.
+
+## [0.10.0] - 2026-11-23
+
+### Added
+- A recipient's first body fetch records an open, and a linked reply records a reply. An open records retrieval, not comprehension.
+- Action requests carry deadlines, with server-side overdue checks and silent host delivery probes.
+
+## [0.9.2] - 2026-11-23
+
+### Added
+- Grouped and searchable onboarding receipts make large rosters easier to inspect.
 
 ## [0.9.1] - 2026-11-23
 

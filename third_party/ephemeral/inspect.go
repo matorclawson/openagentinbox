@@ -65,12 +65,23 @@ func (s *Store) Describe(id string) (Description, error) {
 	return d, nil
 }
 func (s *Store) Find(key, value, after string, limit int) ([]string, error) {
+	return s.FindInState(key, value, "", after, limit)
+}
+
+// FindInState applies an exact attribute filter and an optional run state before pagination.
+func (s *Store) FindInState(key, value, state, after string, limit int) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if limit < 1 || limit > 1000 {
 		return nil, errors.New("limit must be 1..1000")
 	}
-	r, e := s.query("SELECT run FROM attrs WHERE k=? AND v=? AND run>? ORDER BY run LIMIT ?", key, value, after, limit)
+	q := "SELECT run FROM attrs WHERE k=? AND v=? AND run>?"
+	args := []any{key, value, after}
+	if state != "" {
+		q += " AND EXISTS (SELECT 1 FROM runs WHERE id=attrs.run AND state=?)"
+		args = append(args, state)
+	}
+	r, e := s.query(q+" ORDER BY run LIMIT ?", append(args, limit)...)
 	if e != nil {
 		return nil, e
 	}

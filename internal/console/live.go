@@ -173,7 +173,10 @@ func (s *server) workspace(_ http.ResponseWriter, r *http.Request) (any, error) 
 	data := object{"cursor": cursor, "peerLimit": s.peerLimit, "watching": s.live.watchers()}
 	// Array-valued queries keep the wire format stable for an empty workspace.
 	for key, query := range map[string]string{
-		"onboarding": "SELECT o.name,c.label,o.owner,o.verified,o.expires,o.problem FROM onboarding o JOIN paired_cli c ON c.id=o.host ORDER BY o.issued DESC,o.name LIMIT 512",
+		"probes":     "SELECT c.label,p.confirmed,p.incident,(SELECT count(*) FROM onboarding WHERE host=c.id AND verified>0),c.id FROM host_probes p JOIN paired_cli c ON c.id=p.host ORDER BY p.incident DESC,c.label LIMIT 512",
+		"listeners":  "SELECT a.name,coalesce(l.at,0),coalesce(l.mode,'unknown') FROM agents a LEFT JOIN listener_checks l ON a.name=l.seat WHERE a.key IS NOT NULL ORDER BY a.name LIMIT 512",
+		"overdue":    "SELECT r.id,r.seat,r.due,r.state FROM mail_receipts r WHERE r.due IS NOT NULL AND r.escalated=r.due ORDER BY r.due LIMIT 100",
+		"onboarding": "SELECT o.name,c.label,o.owner,o.verified,o.expires,o.problem,o.host FROM onboarding o JOIN paired_cli c ON c.id=o.host ORDER BY o.issued DESC,o.name LIMIT 512",
 		"clients":    "SELECT id,label,deadline,coalesce(paired_at,0),(SELECT count(*) FROM roster WHERE host=paired_cli.id AND expires>?1) FROM paired_cli WHERE paired_at IS NOT NULL OR deadline>?1 ORDER BY rowid DESC",
 		"pending":    "SELECT name,code,expires,peer FROM enrollments WHERE expires>?1 ORDER BY expires,code",
 		"agents":     "SELECT address,key IS NOT NULL,box FROM agents JOIN addresses ON box=name AND current=1 ORDER BY address",
@@ -185,7 +188,7 @@ func (s *server) workspace(_ http.ResponseWriter, r *http.Request) (any, error) 
 		if key == "pending" || key == "roster" || key == "clients" {
 			args = []any{now()}
 		}
-		rows, e := s.db.QueryContext(r.Context(), query, args...)
+		rows, e := s.store.Reader().QueryContext(r.Context(), query, args...)
 		if e != nil {
 			return nil, e
 		}
@@ -369,7 +372,7 @@ func (s *server) handshake(_ http.ResponseWriter, r *http.Request) (any, error) 
 	if e != nil {
 		return nil, e
 	}
-	rows, e := s.db.QueryContext(r.Context(), "SELECT name FROM roster JOIN roster_binding USING(host) WHERE host=? AND ip=? AND expires>? ORDER BY name", hash(b)+"/"+hostname(q.Host), ip, now())
+	rows, e := s.store.Reader().QueryContext(r.Context(), "SELECT name FROM roster JOIN roster_binding USING(host) WHERE host=? AND ip=? AND expires>? ORDER BY name", hash(b)+"/"+hostname(q.Host), ip, now())
 	if e != nil {
 		return nil, e
 	}
@@ -407,7 +410,7 @@ func (s *server) watch(_ http.ResponseWriter, r *http.Request) (any, error) {
 	defer s.live.subscribe(seat)()
 	var latest int64
 	read := func() error {
-		return s.db.QueryRowContext(r.Context(), "SELECT coalesce(max(seq),0) FROM deliveries WHERE seat=?", seat).Scan(&latest)
+		return s.store.Reader().QueryRowContext(r.Context(), "SELECT coalesce(max(seq),0) FROM deliveries WHERE seat=?", seat).Scan(&latest)
 	}
 	if e = read(); e != nil {
 		return nil, e

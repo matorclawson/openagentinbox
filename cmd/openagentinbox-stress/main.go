@@ -23,13 +23,15 @@ import (
 )
 
 type config struct {
-	Daemon, Backup, Scenario                 string
-	Rate, Seats, Workers, History, BodyBytes int
-	Duration, Cooldown, MaxSendP95           time.Duration
-	MinWindowPercent                         float64
-	MaxRSSMiB                                int
+	Daemon, Backup, Scenario, Corpus                string
+	Rate, Seats, Workers, Queue, History, BodyBytes int
+	Duration, Cooldown, MaxSendP95                  time.Duration
+	MinWindowPercent                                float64
+	MaxRSSMiB                                       int
 }
 type bench struct {
+	shapes            []envelopeShape
+	historyDeliveries int
 	config
 	dir, origin, path string
 	keys              []string
@@ -118,6 +120,13 @@ func (b *bench) seed() error {
 		return e
 	}
 	defer s.Close()
+	if b.Corpus != "" {
+		if e = b.readCorpus(); e != nil {
+			return e
+		}
+		return b.seedCorpus(s)
+	}
+	b.historyDeliveries = b.History
 	for i := 0; i < b.History; {
 		batch := make([]deliverystore.Message, 0, 256)
 		for len(batch) < 256 && i < b.History {
@@ -165,20 +174,22 @@ func main() {
 	flag.StringVar(&c.Daemon, "daemon", "", "path to openagentinboxd")
 	flag.StringVar(&c.Backup, "backup", "", "path to openagentinbox-backup (maintenance scenario)")
 	flag.StringVar(&rates, "rates", "100,1000,10000", "comma-separated offered messages per minute")
-	flag.StringVar(&scenarios, "scenarios", "mixed,hot,maintenance", "mixed, hot, maintenance, burst or crash")
+	flag.StringVar(&scenarios, "scenarios", "mixed,hot,maintenance", "mixed, hot, maintenance, burst, requests, crash or trace (requires corpus)")
 	flag.DurationVar(&c.Duration, "duration", time.Minute, "per matrix cell")
 	flag.DurationVar(&c.Cooldown, "cooldown", 0, "record idle memory after each load window")
 	flag.DurationVar(&c.MaxSendP95, "max-send-p95", 0, "optional maximum HTTP send p95")
 	flag.Float64Var(&c.MinWindowPercent, "min-window-percent", 0, "minimum percentage of scheduled sends confirmed inside the window")
 	flag.IntVar(&c.MaxRSSMiB, "max-rss-mib", 0, "optional daemon peak RSS budget")
+	flag.IntVar(&c.Queue, "queue", 0, "pending job capacity (zero uses worker count)")
 	flag.IntVar(&c.Workers, "workers", 32, "maximum concurrent workflows")
 	flag.IntVar(&c.Seats, "seats", 300, "disposable agents")
+	flag.StringVar(&c.Corpus, "corpus", "", "local JSONL corpus for pseudonymous history and live payload sizes; overrides history count")
 	flag.IntVar(&c.History, "history", 10000, "historical messages before each run")
 	flag.IntVar(&c.BodyBytes, "body-bytes", 512, "message body bytes")
 	flag.StringVar(&out, "out", "", "new JSONL report path; default stdout")
 	flag.Parse()
 	die := func(e any) { fmt.Fprintln(os.Stderr, e); os.Exit(1) }
-	if runtime.GOOS != "linux" || c.Seats < 2 || c.Seats > 100000 || c.Workers < 1 || c.Workers > 4096 || c.Duration < time.Second || c.Duration > 7*24*time.Hour || c.History < 0 || c.BodyBytes < 1 || c.BodyBytes > 48000 {
+	if runtime.GOOS != "linux" || c.Seats < 2 || c.Seats > 100000 || c.Workers < 1 || c.Workers > 4096 || c.Queue < 0 || c.Queue > 65536 || c.Duration < time.Second || c.Duration > 7*24*time.Hour || c.History < 0 || c.BodyBytes < 1 || c.BodyBytes > 48000 {
 		die("requires Linux, 2–100000 seats, 1–4096 workers, 1s–7d duration and 1–48000 body bytes")
 	}
 	if c.Cooldown < 0 || c.Cooldown > time.Hour || c.MaxSendP95 < 0 || math.IsNaN(c.MinWindowPercent) || c.MinWindowPercent < 0 || c.MinWindowPercent > 100 || c.MaxRSSMiB < 0 {
@@ -186,8 +197,11 @@ func main() {
 	}
 	var cases []config
 	for _, s := range strings.Split(scenarios, ",") {
-		if s != "mixed" && s != "hot" && s != "maintenance" && s != "burst" && s != "crash" {
+		if s != "mixed" && s != "hot" && s != "maintenance" && s != "burst" && s != "requests" && s != "crash" && s != "trace" {
 			die("unknown scenario " + s)
+		}
+		if s == "trace" && c.Corpus == "" {
+			die("trace requires -corpus")
 		}
 		c.Scenario = s
 		for _, raw := range strings.Split(rates, ",") {
@@ -235,6 +249,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "%s @ %d/min for %s\n", tc.Scenario, tc.Rate, tc.Duration)
 		r, e := execute(tc)
 		r.Config = tc
+		if tc.Corpus != "" {
+			r.Config.History = r.CorpusRows
+			r.Config.Corpus = filepath.Base(tc.Corpus)
+		}
 		if e != nil {
 			r.Failure = e.Error()
 		}

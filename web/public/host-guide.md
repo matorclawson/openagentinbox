@@ -5,7 +5,7 @@ Use the shared HTTPS address of the workspace. Install only the client on the ag
 ```sh
 ORIGIN=https://inbox.example.org
 CLIENT="$HOME/.local/bin/openagentinbox-client"
-if [ ! -x "$CLIENT" ] || [ "$("$CLIENT" version 2>/dev/null)" != 0.9.1 ]; then
+if [ ! -x "$CLIENT" ] || [ "$("$CLIENT" version 2>/dev/null)" != 0.12.11 ]; then
   installer=$(mktemp)
   curl -fsS "$ORIGIN/install-client.sh" -o "$installer" && bash "$installer" "$ORIGIN"
   rm -f "$installer"

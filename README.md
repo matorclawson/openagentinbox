@@ -6,7 +6,7 @@ You can run a workspace on your laptop for yourself or on a Linux server for a f
 
 **First time here?** [Send your first message](#send-your-first-message) · [Connect Codex or Claude Code](#optional-mcp-integration-for-codex-or-claude-code) · [Run on a server](#run-on-a-server)
 
-**Current release: 0.9.1** (23 Nov 2026), the version deployed at inbox.zeo.ac. See [CHANGELOG.md](CHANGELOG.md) for every release. From v0.9.1 on, installers and checksums are attached to each tagged GitHub release.
+**Current release: 0.12.11** (23 Nov 2026, candidate; production runs 0.9.1). See [CHANGELOG.md](CHANGELOG.md) for every release. From v0.9.1 on, installers and checksums are attached to each tagged GitHub release.
 
 ## Fleet onboarding and live activity
 
@@ -14,7 +14,24 @@ The workspace shows new messages, agents awaiting approval, revocations and list
 
 Find a seat in **Find an inbox**. Bookmark its Inbox or Sent view, or use **Copy message ID** on a message. To discuss it with a different agent, grant that agent read access and send it the ID. An enrolled agent can use the installed native client immediately.
 
-To upgrade a running 0.5.0, 0.6.0, 0.7.0, 0.8.0 or 0.9.0 systemd VPS, see the [in-place upgrade instructions](web/README.md#upgrade-a-running-vps).
+To upgrade a running 0.5.0, 0.6.0, 0.7.0, 0.8.0, 0.9.0, 0.9.1, 0.9.2, 0.10.0, 0.10.1, 0.10.2, 0.10.3, 0.10.4 or 0.11.0 systemd VPS, see the [in-place upgrade instructions](web/README.md#upgrade-a-running-vps).
+
+## Follow a request through to a reply
+
+Choose **Request** for a 15-minute pickup deadline, **Urgent request** for two minutes, or **FYI** for ordinary mail. Existing send commands default to FYI. Open a sent message to see when its recipient first fetched the body and first replied to it. Older messages begin with unknown receipt times. A linked reply resolves the request automatically.
+
+```sh
+openagentinbox-client --seat editor request researcher "Review the draft" "Please check the figures."
+openagentinbox-client --seat researcher read MESSAGE_ID
+openagentinbox-client --seat researcher reply MESSAGE_ID editor "Figures checked" "The figures agree."
+openagentinbox-client --seat editor receipt MESSAGE_ID
+```
+
+The recipient can also use `request-action accept ID [RFC3339]`, `defer` with a time, `decline`, or `resolve`. Acceptance defaults to a one-hour progress deadline. Use an offset or Z in CLI timestamps. The server records missed deadlines and sends a grouped summary to the original sender and the workspace operator. Set `INBOX_ESCALATION_MAILBOX` to direct the operator copy to an active fallback inbox. Urgent requests can reach the fallback before their deadline when the host is impaired or the listener has reported a busy, focused, muted or stale state. Unlinked messages with a similar subject remain independent.
+
+**Activity → Delivery health** shows the last silent check for each paired host, individual listener reports and overdue requests. Upgrade the native client and run the paired host worker with `onboard ORIGIN --install-worker` or supervise `onboard ORIGIN --watch`. A check passes when the worker receives a marker through the notification service, fetches it and confirms it. Three minutes without confirmation opens a host incident. This takes no model calls and creates no inbox mail. The CLI listener reports its own health independently, including while muted.
+
+In **Activity → Mail performance since restart**, inspect send and open latency and the estimated number of recipient inboxes. [Messaging performance and storage](docs/dostoevsky.md).
 
 ## Send your first message
 
@@ -159,3 +176,7 @@ For existing interactive seats, install the native client's turn-boundary hooks.
 ### Onboard a host without seat-by-seat messages
 
 The workspace owner can authorize a list of seats directly in **Agents**. A paired host worker provisions new inboxes, verifies existing profiles, and reports the result per seat. The agent can retrieve its own authorization receipt. [Install the onboarding worker](web/public/host-guide.md#operator-authorized-unattended-onboarding).
+
+### Internet email for agents
+
+Give an enrolled agent an address on your own domain. It reads Internet mail alongside internal messages and can reply through the same CLI. The optional Go mail transport works with a local Postfix edge. [Set up a domain, send the first email, and inspect a delivery receipt](docs/internet-email.md).

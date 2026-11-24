@@ -1,8 +1,12 @@
 "use client";
+import {OnboardingStatus,type Receipt} from "./onboarding-status";
 import { useEffect, useState } from "react";
 import { Activity, ArrowUpRight, Mail, Radio, UserRoundPlus, Users } from "lucide-react";
 
 export type Live = {
+  probes?:[string,number,number,number,string][];
+  overdue?:[string,string,number,string][];
+  listeners?:[string,number,string][];
   cursor: string;
   peerLimit: number;
   watching: Record<string,boolean>;
@@ -10,7 +14,7 @@ export type Live = {
   agents: [string,number,string][];
   activity: [string,string,number][];
   mail: [string,string,string,string,string][];
-  onboarding: [string,string,string,number,number,string][];
+  onboarding: Receipt[];
   clients: [string,string,number,number,number][];
   roster: [string,number,number,string,string][];
 };
@@ -40,6 +44,28 @@ export function useWorkspace(owner?: string|null) {
   },[owner]);
   return {data,connection};
 }
+type Sample = {count:number;p95_upper_ms:number};
+type PerformanceSnapshot = {successful_sends:Sample;successful_body_reads:Sample;estimated_recipient_mailboxes:number};
+function MailPerformance(){
+ const [snapshot,setSnapshot]=useState<PerformanceSnapshot|null>(null);
+ const [status,setStatus]=useState("");
+ async function refresh(){
+   setStatus("Loading…");
+   try{
+     const response=await fetch("/api/desk/performance",{cache:"no-store"});
+     if(!response.ok)throw Error();
+     setSnapshot(await response.json());setStatus("");
+   }catch{setStatus("Could not load performance data.")}
+ }
+ return <details className="stream" onToggle={event=>{if(event.currentTarget.open)void refresh()}}>
+   <summary>Mail performance since restart</summary>
+   {snapshot&&<><p>Estimated distinct recipient inboxes · {Math.round(snapshot.estimated_recipient_mailboxes)}</p>
+   <table><thead><tr><th>Successful operations</th><th>Count</th><th>p95 upper bound</th></tr></thead>
+   <tbody>{([["Send",snapshot.successful_sends],["Open message",snapshot.successful_body_reads]] as const).map(([name,v])=><tr key={name}><th scope="row">{name}</th><td>{v.count}</td><td>{v.count?v.p95_upper_ms.toFixed(2)+" ms":"—"}</td></tr>)}</tbody></table></>}
+   {status&&<p role="status">{status}</p>}
+   <button disabled={status==="Loading…"} onClick={()=>void refresh()}>Refresh</button>
+ </details>
+}
 export function Workspace({data,connection,review,openBox}:{data:Live|null;connection:string;review:()=>void;openBox:(name:string)=>void}){
  const active=data?.agents.filter(([,on])=>on).length;
  const feed=[
@@ -53,6 +79,11 @@ export function Workspace({data,connection,review,openBox}:{data:Live|null;conne
     <button onClick={review}><UserRoundPlus/><span>Awaiting approval</span><strong>{data?.pending.length??"—"}</strong><ArrowUpRight size={14}/></button>
     <div><Activity/><span>Listening clients</span><strong>{data?Object.keys(data.watching).length:"—"}</strong></div>
    </div>
+   <MailPerformance/>
+   <section className="stream"><h2>Delivery health</h2>
+   {data?.probes?.length?data.probes.map(([host,last,incident,count,id])=><p key={id}><strong>{host}</strong> · {incident?"Delivery check overdue":last?"Delivery verified":"Awaiting first check"} · {count} verified seats{last?" · Last check "+new Date(last).toLocaleTimeString():""}</p>):<p>No paired hosts reporting yet.</p>}
+   <details><summary>Seat listener checks</summary>{data?.listeners?.map(([seat,at,mode])=><p key={seat}>{seat} · {!at?"No listener check recorded":Date.now()-at>180000?"Check overdue":mode} · {at?new Date(at).toLocaleTimeString():"—"}</p>)}</details>
+   <h2>Overdue requests</h2>{data?.overdue?.length?data.overdue.map(([id,seat,due,state])=><p key={id}><a href={"/messages/"+encodeURIComponent(id)}>{seat} · {state}</a> · Due {new Date(due).toLocaleString()}</p>):<p>No overdue requests.</p>}</section>
    <details className="stream" open><summary>Recent activity</summary><ol>{feed.slice(0,5).map((v,i)=><li key={v.at+"-"+i}>{v.mail?<Mail size={16}/>:<Users size={16}/>}<div>{v.mail?<button onClick={()=>openBox(v.box)}>{v.title}</button>:<b>{v.title}</b>}<small>{v.detail}</small></div><time title={new Date(v.at).toLocaleString()}>{new Date(v.at).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</time></li>)}</ol>{!feed.length&&<p>{data?"Activity will appear when someone joins or sends mail.":"Connecting to your workspace…"}</p>}</details>
  </section>
 }
@@ -65,7 +96,7 @@ export function EnrollmentQueue({data}:{data:Live}){
  const [review,setReview]=useState<Live["pending"]|null>(null),[msg,setMsg]=useState(""),[busy,setBusy]=useState(false);
  async function action(fn:()=>Promise<void>){setBusy(true);setMsg("");try{await fn()}catch(e){setMsg((e as Error).message)}finally{setBusy(false)}}
  const queue=review??data.pending;
- return <div className="queue"><section className="card detail">
+ return <div className="queue">{data.onboarding?.length>0&&<OnboardingStatus rows={data.onboarding}/>}<section className="card detail">
  <h2>Enrollment queue <small>{queue.length}</small></h2>
  <p>Match the names and codes with the requests from your agents.</p>
  {queue.length>0&&<ul className="requests">{queue.map(([n,c,expires,peer])=><li key={c}><strong>{n}</strong><small>{peer}</small><code>{c}</code>{!review&&<button onClick={()=>setReview([[n,c,expires,peer]])}>Review</button>}</li>)}</ul>}
@@ -105,7 +136,6 @@ function ClientPairing({data}:{data:Live}){
  <button onClick={()=>void act(async()=>{await navigator.clipboard.writeText(pair.code);setMessage("Token copied.")})}>Copy token</button>
  <small>Single use · expires at {new Date(pair.expires).toLocaleTimeString()}</small></div>}
  {target&&<p>Authorize this paired host to enroll missing inboxes and verify existing seat profiles. Start its worker once under the account that owns those profiles: <code>openagentinbox-client onboard {window.location.origin} --install-worker</code></p>}
- {data.onboarding?.length>0&&<details className="card detail" open><summary>Onboarding status</summary>{data.onboarding.map(([name,host,owner,at,expires,problem],i)=><div key={i}><strong>{name}</strong> · {host} · authorized by {owner} · {at?"CLI verified "+new Date(at).toLocaleString():expires<=Date.now()?"Authorization expired":problem||"Awaiting host"}</div>)}</details>}
  {data.clients.map(([id,label,expires,at,remaining])=><div className="agentrow" key={id}><strong>{at?label:"Awaiting CLI login"}</strong><small>{at?"Paired · "+id.slice(-6)+" · "+remaining+" unclaimed":"Expires "+new Date(expires).toLocaleTimeString()}</small><button disabled={busy} onClick={()=>void act(async()=>{await post("pair/revoke",{id});if(pair?.id===id)setPair(null);if(target===id)setTarget("");setMessage(at?"CLI revoked.":"Pairing canceled.")})}>{at?"Revoke CLI":"Cancel pairing"}</button></div>)}
  {message&&<p role="status">{message}</p>}<a href="/host-guide.md">Install the CLI and onboard a fleet</a>
  </section>
