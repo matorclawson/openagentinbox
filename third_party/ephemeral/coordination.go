@@ -2,9 +2,11 @@ package ephemeral
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strconv"
 )
 
@@ -20,14 +22,9 @@ func (s *Store) StartOnce(id, name string, version int, queue string, input json
 	if attrs == nil {
 		attrs = map[string]string{}
 	}
-	payload, err := json.Marshal([]any{name, version, queue, string(input), attrs})
-	if err != nil {
-		return false, err
-	}
-	sum := sha256.Sum256(payload)
-	digest := hex.EncodeToString(sum[:])
+	digest := startFingerprint(name, version, queue, input, attrs)
 	created := false
-	err = s.tx(func() error {
+	err := s.tx(func() error {
 		r, e := s.query("SELECT coalesce(digest,'') FROM runs LEFT JOIN start_requests ON run=id WHERE id=?", id)
 		if e != nil {
 			return e
@@ -48,6 +45,35 @@ func (s *Store) StartOnce(id, name string, version int, queue string, input json
 		return nil
 	})
 	return created && err == nil, err
+}
+
+// startFingerprint hashes the exact request bytes. Every field is length-prefixed, so
+// distinct inputs never collide through delimiters. It does not go through JSON
+// marshalling, which would replace malformed UTF-8 with U+FFFD and could treat two
+// different accepted request bodies as one.
+func startFingerprint(name string, version int, queue string, input []byte, attrs map[string]string) string {
+	h := sha256.New()
+	field := func(v string) {
+		var n [8]byte
+		binary.BigEndian.PutUint64(n[:], uint64(len(v)))
+		h.Write(n[:])
+		h.Write([]byte(v))
+	}
+	field(name)
+	field(strconv.Itoa(version))
+	field(queue)
+	field(string(input))
+	keys := make([]string, 0, len(attrs))
+	for k := range attrs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	field(strconv.Itoa(len(keys)))
+	for _, k := range keys {
+		field(k)
+		field(attrs[k])
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // NextDue returns the earliest runnable transition in this queue in Unix milliseconds.
