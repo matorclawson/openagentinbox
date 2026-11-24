@@ -11,7 +11,7 @@ import (
 	"os"
 )
 
-const help = "OpenAgentInbox messaging server\n\nUsage: openagentinboxd serve\n       openagentinboxd snapshot DATABASE NEW-FILE\n       openagentinboxd digest DATABASE\n\nServes the web inbox, agent HTTP API and MCP at /mcp.\nSet INBOX_DATA to choose the data directory and INBOX_PORT to choose the port.\nsnapshot writes an integrity-checked copy of a live database to a new file in a private (0700) directory.\ndigest prints a digest of a database's rows, independent of file layout."
+const help = "OpenAgentInbox messaging server\n\nUsage: openagentinboxd serve\n       openagentinboxd snapshot DATABASE NEW-FILE\n\nServes the web inbox, agent HTTP API and MCP at /mcp.\nSet INBOX_DATA to choose the data directory and INBOX_PORT to choose the port.\nsnapshot writes an integrity-checked copy of a live database to a new file in a private (0700) directory."
 
 func main() {
 	switch {
@@ -24,13 +24,6 @@ func main() {
 			os.Exit(1)
 		}
 		json.NewEncoder(os.Stdout).Encode(m)
-	case len(os.Args) == 3 && os.Args[1] == "digest":
-		d, err := sqlitebackup.Digest(context.Background(), os.Args[2])
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		fmt.Println(d)
 	case len(os.Args) == 2 && os.Args[1] == "serve":
 		if err := console.Run(); err != nil {
 			log.Fatal(err)

@@ -232,28 +232,29 @@ systemd-run --quiet --unit="$check" --collect --property=User=openagentinbox --p
 wait_health "http://127.0.0.1:$cport/api/health" "$cinstance" "$check" &&
 curl -fsS --max-time 3 "http://127.0.0.1:$cport/api/health" | grep -Fq '"version":"0.12.11"' || rollback
 confirm_stopped "$check" || rollback
-# The store as the candidate left it, migrated and at rest. If the public start fails, a
-# store that still has exactly these rows accepted no write and can safely be restored.
-post_digest=$(runuser -u openagentinbox -- "$release/openagentinboxd" digest "$db") || rollback
-[[ -n $post_digest ]] || rollback
 activate "$release"
-# After the private check the store is at rest with a known digest. A failed public start is
-# rolled back only if the store still has exactly those rows. Any difference means the
-# candidate accepted a write that a restored copy would lose, and the release moves forward
-# only. This does not depend on seeing the public listener, so a brief window cannot hide a
-# write.
+# Once the service has been started on the public port, the candidate may have accepted
+# writes that a restored copy would lose, and no check of the store can rule that out. So a
+# failure from here on is never rolled back automatically: the service is stopped, the store
+# and the pre-upgrade copy are kept, and the manual restore steps are printed. Automatic
+# restore applies only to failures before this point, in the private check.
 wait_public(){ wait_health "$health" '"version":"0.12.11"' "$service"; }
 public_failure(){
-  local now
   show_logs
-  if ! confirm_stopped "$service"; then
-    echo "Could not confirm the service stopped, so the store was not touched. The pre-upgrade copy is $snap." >&2
-    exit 1
-  fi
-  if now=$(runuser -u openagentinbox -- "$release/openagentinboxd" digest "$db") && [[ $now == "$post_digest" ]]; then
-    rollback
-  fi
-  echo "Upgrade failed after the store changed beyond the private check, or the store could not be compared, so writes may have been accepted. Nothing was restored. The active release is $release, the store at $db is kept and the service is stopped. The pre-upgrade copy is $snap. Fix forward and start openagentinbox.service, or reconcile the accepted writes and restore the copy by hand." >&2
+  confirm_stopped "$service" || echo 'Could not confirm the service stopped; stop it before anything below.' >&2
+  cat >&2 <<MSG
+Upgrade failed after the service started on the public port, so writes may have been accepted. Nothing was restored. The service is stopped; release $release is active and its store at $db is kept.
+The pre-upgrade copy is $snap.
+To fix forward, correct the cause and run: systemctl start $service
+To go back to $before and lose anything written since the copy:
+  systemctl stop $service
+  mkdir -p $data/failed-by-hand-$stamp
+  for f in $db $db-wal $db-shm; do [ ! -e \$f ] || mv \$f $data/failed-by-hand-$stamp/; done
+  install -m 0600 -o openagentinbox -g openagentinbox $snap $db
+  ln -sfn $previous $base/active
+  systemctl start $service
+Run these as root.
+MSG
   exit 1
 }
 if systemctl start "$service" && wait_public; then
