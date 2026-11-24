@@ -19,7 +19,7 @@ export function MailSetup({boxes,onChange}:{boxes:string[],onChange:()=>Promise<
  async function act(fn:()=>Promise<void>){wait(true);setErr("");say("");try{await fn()}catch(e){setErr(String((e as Error).message))}finally{wait(false)}}
  useEffect(()=>{let active=true;request("setup").then((s:Setup)=>{if(active){setSetup(s);choose(s.domains[0]?.domain??"")}}).catch(e=>active&&setErr(e.message));return()=>{active=false}},[]);
  useEffect(()=>{let active=true;setAddr(null);request("addresses?box="+encodeURIComponent(box)).then(v=>active&&setAddr(v)).catch(e=>active&&setErr(e.message));return()=>{active=false}},[box,setup]);
- useEffect(()=>{let active=true;setRecords([]);if(domain)request("domains/"+domain+"/check",{}).then(v=>active&&setRecords(v.records)).catch(e=>active&&setErr(e.message));return()=>{active=false}},[domain,setup]);
+ useEffect(()=>{setRecords([])},[domain]);
  return <div className="mail-setup"><div className="section-title"><h1>Mail setup</h1></div>
  <p>Connect a domain you own to give each agent an email address. Your internal inboxes already work.</p>
  {err&&<p role="alert">{err}</p>}{notice&&<p role="status">{notice}</p>}
@@ -40,8 +40,9 @@ export function MailSetup({boxes,onChange}:{boxes:string[],onChange:()=>Promise<
  <button disabled={busy} onClick={()=>void act(async()=>setSetup(await request("setup")))}>Refresh connection</button></section>
  <section className="card detail"><h2>3. Add records at your DNS provider</h2><p>Open the site where you manage the domain, find DNS records and choose Add record. The names below are full names. If your provider appends your zone automatically, enter only the part before that zone. Use the default TTL.</p>
  <p>Start with the ownership TXT and server IP. Activate the domain below before pointing incoming mail at it with MX. For MX enter priority 10. For the DKIM value use the public record printed by the server.</p>
+ {records.length===0&&<p>No DNS lookup has been made. OpenAgentInbox queries DNS only when you press Check DNS.</p>}
  {records.map(r=><section key={r.Name+r.Type} className="dns-record"><strong>{r.Type} · {r.OK?"Found":r.Error?"Lookup unavailable":"Awaiting record"}</strong><label>Name <code>{r.Name}</code></label><Copy value={r.Name}/>{r.Value&&<><label>Value <code>{r.Value}</code></label><Copy value={r.Value}/></>}<p>{r.Help}</p></section>)}
- <button disabled={busy} onClick={()=>void act(async()=>{setRecords((await request("domains/"+domain+"/check",{})).records);say("DNS checked again.")})}>Check DNS again</button>
+ <button disabled={busy} onClick={()=>void act(async()=>{setRecords((await request("domains/"+domain+"/check",{})).records);say("DNS checked.")})}>Check DNS</button>
  <button disabled={busy||plan.active||!setup?.edge||!records[0]?.OK} onClick={()=>void act(async()=>{setSetup(await request("domains/"+domain+"/activate",{}));await onChange();say("Domain activated.")})}>{plan.active?"Domain active":"Activate receiving"}</button>
  {plan.active&&setup?.primary!==domain&&<button disabled={busy} onClick={()=>void act(async()=>{setSetup(await request("domains/"+domain+"/primary",{}));await onChange();say("Default sender domain updated.")})}>Use as default address domain</button>}
  <p>After activation, publish the MX record. Allow inbound TCP port 25 in your VPS firewall. Send one email from another provider and reply to it to confirm delivery in both directions.</p></section></>}

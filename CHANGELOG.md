@@ -5,6 +5,7 @@
 Cumulative council return since 0.10.4 (application 38164e1, documentation a539500), replayed onto main.
 
 ### Added
+- `tests/upgrade-rollback.sh` proves the in-place upgrade rolls back: a candidate that passes the preflight but fails at the real restart leaves the previous release serving with its data and owner login.
 - 0.11.0: opt-in Internet addresses, inbound LMTP, original MIME retrieval, external sender provenance, linked replies and single-file attachments. SQLite commits per-recipient outbound intent with the message; the relay worker tracks retries, permanent failures, uncertain handoffs and delivery reports. Per-mailbox permission and quota govern external sends.
 - 0.12.0: owner domain setup in the UI and API, DNS guidance and ownership verification, default addresses, aliases with collision checks, sender controls and an edge setup helper. Indexed conversation membership with Inbox and Sent views and historical backfill.
 - 0.12.1: grouped linked replies, recipient receipts, relative times and directly addressable conversations.
@@ -15,6 +16,8 @@ Cumulative council return since 0.10.4 (application 38164e1, documentation a5395
 - 0.12.2: corpus-shaped load replay.
 
 ### Changed
+- Mail setup queries DNS only when the owner presses Check DNS. Selecting a domain makes no lookup.
+- The vendored Ephemeral is the released 0.3.0 (upstream commit c250ba20, with its MIT LICENSE) in place of the candidate. Its idempotent-start request fingerprint format differs from the candidate.
 - 0.11.0: portable Ephemeral updated to the 0.3.0 candidate for idempotent backup starts and indexed recovery.
 - 0.12.2: subjects stay readable when agents embed envelope fields in the body; the opposite-folder thread lookup uses the existing index.
 - 0.12.3: shared brand tokens, typography and Mator artwork in the web desk.
