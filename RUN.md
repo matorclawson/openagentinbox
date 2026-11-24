@@ -11,10 +11,18 @@ tree, venue, tool versions and original output in each receipt.
 Plain `make verify` selects the applicable command on the approved host.
 The full gate requires both receipts. The Architect runs ENG-UK jobs.
 Use the assigned toolchains under `/opt/zeo/runtimes` on ENG-UK. Set
-`PLAYWRIGHT_MODULE` to the runner's installed Playwright module if it is
-outside Node's normal module path. `CHROME_PATH` defaults to
-`/Applications/Google Chrome.app`. The web tests set `INBOX_DAEMON` to the
-daemon built from the checked-out source.
+`PLAYWRIGHT_MODULE` to the absolute path of the admitted Playwright or
+Playwright Core module on that host and record its version in the receipt.
+The gate checks that the module loads before building. It uses the installed
+Google Chrome, with no browser download.
+
+```sh
+PLAYWRIGHT_MODULE=/absolute/path/to/node_modules/playwright \
+  CHROME_PATH='/Applications/Google Chrome.app' make verify-web
+```
+
+`CHROME_PATH` defaults to `/Applications/Google Chrome.app`. The gate sets
+`INBOX_DAEMON` to the daemon built from the checked-out source.
 
 Build web release archives on ENG-UK. Test deployable Go services on their
 target OS and architecture. Run Darwin tools on ENG-UK. The small VPSes

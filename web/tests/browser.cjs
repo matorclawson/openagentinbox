@@ -149,14 +149,20 @@ const fs = require("fs"),
       "Send me the three papers you recommend."
     )
       throw Error("agent body");
-    await page.getByRole("button", { name: "Inbox", exact: true }).click();
-    await call(
+    const reply = await call(
       "reply", mail.rows[0].id,
       "operator",
       "Your reading list",
       "The reading list is ready.",
     );
-    await page.locator(".letter").filter({hasText:"Your reading list"}).click();
+    if (!reply.id) throw Error("Agent reply did not return a message ID");
+    await page.getByRole("button", { name: "Inbox", exact: true }).click();
+    await page.locator(`a[data-message="${reply.id}"]`)
+      .getByText("Your reading list", { exact: true }).click();
+    await page.getByRole("heading", { name: "Weekly reading list", exact: true }).waitFor();
+    await page.getByRole("button", { name: /Your reading list/ }).click();
+    await page.getByRole("link", { name: /^Open message page/ }).click();
+    await page.waitForURL(`**/messages/${reply.id}`);
     await page.getByText("The reading list is ready.").waitFor();
     const receipt=await call("receipt",mail.rows[0].id);
     if(receipt.state!=="resolved"||receipt.opened<=0||receipt.replied<=0)throw Error("Incomplete request receipt");
@@ -167,6 +173,7 @@ const fs = require("fs"),
     await page.getByText("The reading list is ready.").waitFor();
     await page.context().grantPermissions(["clipboard-read","clipboard-write"]);
     await page.getByRole("button",{name:"Copy message ID"}).click();
+    await page.getByText("Message ID copied.", { exact: true }).waitFor();
     if (await page.evaluate(()=>navigator.clipboard.readText()) !== messageID) throw Error("Wrong ID copied");
     const agents = await page.evaluate(async () => {
       const result=[];
@@ -184,6 +191,7 @@ const fs = require("fs"),
     fs.writeFileSync(path.join(profiles,seat+".json"),JSON.stringify({name:seat,origin:url,token:agents[0].credential}),{mode:0o600});
     const seatCLI=(...args)=>child.spawnSync(native,["--seat",seat,...args],{env:{...process.env,HOME:dir},encoding:"utf8"});
     if(JSON.parse(seatCLI("whoami").stdout).name!==seat || !seatCLI("read",messageID).stderr.includes("404"))throw Error("Unexpected initial seat access");
+    await page.getByText("Share access", { exact: true }).click();
     await page.getByLabel("Grant read access to an agent").fill(seat);
     await page.getByRole("button",{name:"Grant access"}).click();
     await page.getByText(seat+" can now read this message by ID.").waitFor();
@@ -222,7 +230,7 @@ const fs = require("fs"),
     await page.getByRole("button", { name: "Sign out" }).click();
     await page.getByRole("button", { name: "Sign in", exact: true }).waitFor();
     console.log(
-      "PASS: Chromium onboarding, provisioning, compose, agent reply, inbox detail, mobile width and sign-out",
+      "PASS: Browser onboarding, provisioning, compose, agent reply, conversation, message detail, mobile width and sign-out",
     );
   } finally {
     if (browser) await browser.close();
