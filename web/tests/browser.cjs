@@ -22,14 +22,15 @@ const fs = require("fs"),
       } catch {}
       await new Promise((r) => setTimeout(r, 100));
     }
+    const chromePath = process.env.CHROME_PATH || process.env.CHROMIUM_PATH;
+    const executablePath = chromePath?.endsWith(".app")
+      ? path.join(chromePath, "Contents", "MacOS", "Google Chrome")
+      : chromePath;
     browser = await chromium.launch({
-      executablePath: process.env.CHROMIUM_PATH,
-      args: [
-        "--no-sandbox",
-        "--disable-dev-shm-usage",
-        "--no-zygote",
-        "--single-process",
-      ],
+      executablePath,
+      ...(process.platform === "linux" ? {
+        args: ["--no-sandbox", "--disable-dev-shm-usage", "--no-zygote", "--single-process"],
+      } : {}),
     });
     const context = await browser.newContext({
       viewport: { width: 1200, height: 800 },

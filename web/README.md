@@ -20,20 +20,9 @@ Open http://127.0.0.1:4310. Read the setup code at the path printed by the launc
 
 ## Verification
 
-From the repository root, build the Go daemon for the development machine, export the web app, and run the HTTP tests against that executable.
+On ENG-UK, run `make verify-web` from the repository root. It builds the fixture daemon and client binaries, builds and typechecks the web app, runs the HTTP tests with `INBOX_DAEMON`, and runs the browser checks in Google Chrome. See [verification and release venues](../RUN.md) for toolchain and browser settings.
 
-```sh
-mkdir -p build
-go build -o ./build/openagentinboxd ./cmd/openagentinboxd
-bash scripts/build-clients.sh dist/ui
-cd web
-npm ci
-npm run build
-npm run typecheck
-INBOX_DAEMON="$(cd ../build && pwd)/openagentinboxd" npm test
-```
-
-`scripts/build-clients.sh` builds the agent client binaries into `dist/ui/clients`. Three tests start `dist/ui/clients/darwin-arm64`, so they fail without this step. The default tests cover standalone accounts, agent enrollment, message delivery, MCP and migration. The optional OpenPassword test requires the companion source checkout with its dependencies installed and its TypeScript loader enabled. The release qualification logs include that integration.
+Tests that exercise the native client use the binary in `dist/ui/clients` for the current OS and architecture. The default tests cover standalone accounts, agent enrollment, message delivery, MCP and migration. The optional OpenPassword test requires the companion source checkout with its dependencies installed and its TypeScript loader enabled. The release qualification logs include that integration.
 
 ## Local and VPS installations
 
