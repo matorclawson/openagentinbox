@@ -25,6 +25,7 @@ From the repository root, build the Go daemon for the development machine, expor
 ```sh
 mkdir -p build
 go build -o ./build/openagentinboxd ./cmd/openagentinboxd
+bash scripts/build-clients.sh dist/ui
 cd web
 npm ci
 npm run build
@@ -32,7 +33,7 @@ npm run typecheck
 INBOX_DAEMON="$(cd ../build && pwd)/openagentinboxd" npm test
 ```
 
-The default tests cover standalone accounts, agent enrollment, message delivery, MCP and migration. The optional OpenPassword test requires the companion source checkout with its dependencies installed and its TypeScript loader enabled. The release qualification logs include that integration.
+`scripts/build-clients.sh` builds the agent client binaries into `dist/ui/clients`. Three tests start `dist/ui/clients/darwin-arm64`, so they fail without this step. The default tests cover standalone accounts, agent enrollment, message delivery, MCP and migration. The optional OpenPassword test requires the companion source checkout with its dependencies installed and its TypeScript loader enabled. The release qualification logs include that integration.
 
 ## Local and VPS installations
 
