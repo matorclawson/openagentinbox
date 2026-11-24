@@ -79,24 +79,31 @@ data=/var/lib/openagentinbox
 db=$data/console.sqlite
 snaps=$data/upgrade-snapshots
 check=openagentinbox-upgrade-check
+# BEGIN confirm_stopped
 # confirm_stopped UNIT: stop it and prove it is gone. Every query must succeed and show the
-# unit inactive or failed, no main process, and no process left in its control group; a
-# query that fails counts as not confirmed.
+# unit inactive or failed, no main process, and no process in its control group, read from
+# the group's member list. A query that fails counts as not confirmed.
+cgroup_members(){
+  local f=/sys/fs/cgroup$1/cgroup.procs
+  [[ -n $1 && -e $f ]] || return 0
+  cat "$f" 2>/dev/null || [[ ! -e $f ]]
+}
 confirm_stopped(){
-  local unit=$1 i state pid cg
+  local unit=$1 i state pid cg members
   systemctl stop "$unit" 2>/dev/null || true
   for ((i=0;i<120;i++)); do
     if state=$(systemctl show -p ActiveState --value "$unit" 2>/dev/null) &&
        pid=$(systemctl show -p MainPID --value "$unit" 2>/dev/null) &&
        cg=$(systemctl show -p ControlGroup --value "$unit" 2>/dev/null) &&
        [[ $state == inactive || $state == failed ]] && [[ $pid == 0 ]] &&
-       { [[ -z $cg || ! -s /sys/fs/cgroup$cg/cgroup.procs ]]; }; then
+       members=$(cgroup_members "$cg") && [[ -z $members ]]; then
       return 0
     fi
     sleep 0.5
   done
   return 1
 }
+# END confirm_stopped
 show_logs(){
   journalctl -u "$check" -u "$service" --no-pager -n 30 -o cat 2>/dev/null | sed 's/^/  | /' >&2 || true
 }
@@ -127,8 +134,33 @@ if [[ -z $snap_sha ]]; then
   echo 'The pre-upgrade copy reported no checksum. The store is unchanged; restarted the previous release.' >&2
   exit 1
 fi
+# BEGIN restore_store
+# archive_failed_store DB DIR: keep the active store and its sidecars in DIR under names no
+# earlier archive uses, so a retried restore never overwrites the first archive.
+archive_failed_store(){
+  local db=$1 dir=$2 n=0 suffix='' f
+  install -d -m 0700 -o openagentinbox -g openagentinbox "$dir"
+  while [[ -e $dir/console.sqlite$suffix ]]; do n=$((n+1)); suffix=.$n; done
+  ln "$db" "$dir/console.sqlite$suffix"
+  for f in "$db-wal" "$db-shm"; do [[ ! -e $f ]] || mv -n "$f" "$dir/$(basename "$f")$suffix"; done
+}
+# restore_store DB FAILED-DIR SNAPSHOT SNAPSHOT-SHA256 STAGING: console.sqlite is never absent.
+# The active store is hard-linked into the archive, then the copy replaces it by atomic
+# rename. If the active store already is the copy, an earlier run finished the replacement,
+# and it is left alone: it is never archived as a failed store. Run it again after any
+# interruption.
+restore_store(){
+  local db=$1 dir=$2 snap=$3 sha=$4 staging=$5
+  if [[ $(sha256sum < "$db" | cut -d' ' -f1) == "$sha" ]]; then return 0; fi
+  archive_failed_store "$db" "$dir"
+  install -m 0600 -o openagentinbox -g openagentinbox "$snap" "$staging"
+  mv -T "$staging" "$db"
+}
+# END restore_store
 # Undo a failed upgrade: confirm nothing else holds the store, keep the failed store for
 # reconciliation, restore the copy by atomic rename, and start the previous release.
+# If this process dies partway, the copy is intact; stop both units and copy it over
+# console.sqlite after saving the active file under a new name.
 rollback(){
   show_logs
   if ! confirm_stopped "$check" || ! confirm_stopped "$service"; then
@@ -140,16 +172,8 @@ rollback(){
     echo "The pre-upgrade copy $snap no longer matches its checksum, so the store was not touched. Do not restore it." >&2
     exit 1
   fi
-  # console.sqlite is never absent: the failed store is hard-linked aside, then the copy
-  # replaces it by atomic rename. Signals are ignored for these few steps. If the process
-  # still dies between them, the active store is the failed one and the copy is intact:
-  # run the same steps again by hand.
   trap '' INT TERM HUP
-  install -d -m 0700 -o openagentinbox -g openagentinbox "$failed"
-  ln -f "$db" "$failed/console.sqlite"
-  for f in "$db-wal" "$db-shm"; do [[ ! -e $f ]] || mv -f "$f" "$failed/"; done
-  install -m 0600 -o openagentinbox -g openagentinbox "$snap" "$data/.restore.$stamp"
-  mv -T "$data/.restore.$stamp" "$db"
+  restore_store "$db" "$failed" "$snap" "$snap_sha" "$data/.restore.$stamp"
   trap - INT TERM HUP
   if [[ $(sha256sum < "$db" | cut -d' ' -f1) != "$snap_sha" ]]; then
     echo "The restored store does not match the pre-upgrade copy $snap. The previous release was not started. The failed store is in $failed." >&2
@@ -167,7 +191,8 @@ rollback(){
 # unit with the service's account, environment files and sandbox. Nothing reaches it
 # through the public listener or the reverse proxy until it has migrated the store and
 # answered. A candidate that fails here is rolled back before it could accept public writes.
-cport=$((20000 + RANDOM % 20000))
+cport=4310
+while [[ $cport == 4310 ]] || (exec 3<>"/dev/tcp/127.0.0.1/$cport") 2>/dev/null; do cport=$((20000 + RANDOM % 20000)); done
 cinstance=$(cat /proc/sys/kernel/random/uuid)
 # The service's environment files override Environment= properties, so the port and the
 # other settings that matter are applied by env(1) on the command line, where they win.
@@ -186,11 +211,30 @@ wait_health "http://127.0.0.1:$cport/api/health" "$cinstance" "$check" &&
 curl -fsS --max-time 3 "http://127.0.0.1:$cport/api/health" | grep -Fq '"version":"0.12.11"' || rollback
 confirm_stopped "$check" || rollback
 activate "$release"
-if systemctl start "$service" && wait_health "$health" '"version":"0.12.11"' "$service"; then
+# From the moment the public listener is reachable, the candidate may have accepted writes
+# that a restored copy would lose. wait_public records whether it ever was reachable. If
+# the start fails before that, rollback restores the copy. If it was reachable, the
+# release moves forward only: nothing is restored, and the copy is kept for reconciliation.
+public_seen=0
+wait_public(){
+  local i
+  for ((i=0;i<480;i++)); do
+    if (exec 3<>"/dev/tcp/127.0.0.1/4310") 2>/dev/null; then public_seen=1; fi
+    if curl -fsS --max-time 1 "$health" 2>/dev/null | grep -Fq '"version":"0.12.11"'; then return 0; fi
+    if [[ $i -ge 8 ]] && ! systemctl is-active --quiet "$service"; then return 1; fi
+    sleep 0.25
+  done
+  return 1
+}
+if systemctl start "$service" && wait_public; then
   echo "Serving $version. Previous release retained at $previous. Pre-upgrade copy: $snap"
   # Keep the newest three copies. Failed stores are never removed here.
   mapfile -t stale < <(ls -1t "$snaps"/pre-*.sqlite 2>/dev/null | tail -n +4)
   (( ${#stale[@]} == 0 )) || rm -f -- "${stale[@]}"
+elif (( public_seen )) || (exec 3<>"/dev/tcp/127.0.0.1/4310") 2>/dev/null; then
+  show_logs
+  echo "Upgrade failed after the public listener was reachable, so writes may have been accepted. Nothing was restored. The active release is $release and the store at $db is in use. The pre-upgrade copy is $snap. Fix forward, or stop openagentinbox.service, reconcile the accepted writes and restore the copy by hand." >&2
+  exit 1
 else
   rollback
 fi
