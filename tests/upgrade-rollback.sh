@@ -285,8 +285,10 @@ forced_accepted(){
     ! grep -Fq 'port=4310' /var/lib/openagentinbox/test-private-check.log || die 'late: the private check listened on 4310'
   fi
   # Run the manual steps the installer printed, exactly as printed.
-  sed -n '/^To go back to /,/^Run these as root/p' "$work/upgrade.err" | sed '1d;$d' > "$work/manual-restore.sh"
-  [[ $(wc -l < "$work/manual-restore.sh") -ge 5 ]] || die "$mode: the installer printed no manual restore steps"
+  sed -n '/^To go back to /,/^Run these as root/p' "$work/upgrade.err" | grep '^  ' > "$work/manual-restore.sh"
+  # The installer must print the copy's checksum, and the steps must verify it.
+  grep -Fq 'sha256sum -c -' "$work/manual-restore.sh" || die "$mode: the manual steps do not verify the copy"
+  [[ $(wc -l < "$work/manual-restore.sh") -ge 6 ]] || die "$mode: the installer printed no manual restore steps"
   systemctl reset-failed openagentinbox.service || true
   bash -e "$work/manual-restore.sh" >&2 || die "$mode: the printed manual restore steps failed"
   wait_version "$old" || die "$mode: the previous release did not start from the kept copy"

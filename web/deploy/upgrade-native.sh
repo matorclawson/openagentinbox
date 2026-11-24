@@ -233,26 +233,30 @@ wait_health "http://127.0.0.1:$cport/api/health" "$cinstance" "$check" &&
 curl -fsS --max-time 3 "http://127.0.0.1:$cport/api/health" | grep -Fq '"version":"0.12.11"' || rollback
 confirm_stopped "$check" || rollback
 activate "$release"
-# Once the service has been started on the public port, the candidate may have accepted
+# Once the installer has attempted to start the service on the public port, the candidate may have accepted
 # writes that a restored copy would lose, and no check of the store can rule that out. So a
 # failure from here on is never rolled back automatically: the service is stopped, the store
 # and the pre-upgrade copy are kept, and the manual restore steps are printed. Automatic
 # restore applies only to failures before this point, in the private check.
 wait_public(){ wait_health "$health" '"version":"0.12.11"' "$service"; }
 public_failure(){
+  local state='The service is stopped'
   show_logs
-  confirm_stopped "$service" || echo 'Could not confirm the service stopped; stop it before anything below.' >&2
+  confirm_stopped "$service" || state='The service could NOT be confirmed stopped; stop it first'
   cat >&2 <<MSG
-Upgrade failed after the service started on the public port, so writes may have been accepted. Nothing was restored. The service is stopped; release $release is active and its store at $db is kept.
-The pre-upgrade copy is $snap.
+Upgrade failed after the installer attempted to start the service on the public port, so writes may have been accepted. Nothing was restored. $state; release $release is active and its store at $db is kept.
+The pre-upgrade copy is $snap
+Its sha256 is $snap_sha
 To fix forward, correct the cause and run: systemctl start $service
-To go back to $before and lose anything written since the copy:
+To go back to $before and lose anything written since the copy, run as root:
   systemctl stop $service
-  mkdir -p $data/failed-by-hand-$stamp
-  for f in $db $db-wal $db-shm; do [ ! -e \$f ] || mv \$f $data/failed-by-hand-$stamp/; done
+  echo "$snap_sha  $snap" | sha256sum -c -
+  dest=$data/failed-by-hand-\$(date -u +%Y%m%dT%H%M%SZ)-\$\$; mkdir "\$dest"
+  for f in $db $db-wal $db-shm; do [ ! -e \$f ] || mv \$f "\$dest"/; done
   install -m 0600 -o openagentinbox -g openagentinbox $snap $db
   ln -sfn $previous $base/active
   systemctl start $service
+The checksum line must print OK before anything moves; mkdir refuses a destination that exists, so a repeated run never overwrites an earlier archive.
 Run these as root.
 MSG
   exit 1
