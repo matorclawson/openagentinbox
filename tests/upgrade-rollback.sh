@@ -6,13 +6,13 @@
 # Run as root on a DISPOSABLE Linux systemd host that has no OpenAgentInbox
 # installation. It installs the previous release and creates an owner, then runs
 # three forced failures in turn and finally the real upgrade:
-#   early:    the candidate exits before it opens the store;
+#   early:    the candidate cannot start, so the preflight refuses it and nothing is stopped;
 #   migrated: the candidate migrates the real store, then is killed and exits 1;
 #   late:     the candidate passes its private-port check, then fails as the service.
 # After each failure the previous release must serve again from its pre-upgrade
 # store copy. The last step upgrades with the unmodified candidate.
 #
-#   INBOX_ROLLBACK_TEST_DISPOSABLE=yes sudo -E bash tests/upgrade-rollback.sh PREVIOUS-INSTALLER CANDIDATE-INSTALLER
+#   sudo env INBOX_ROLLBACK_TEST_DISPOSABLE=yes bash tests/upgrade-rollback.sh PREVIOUS-INSTALLER CANDIDATE-INSTALLER
 #
 # Both arguments are packaged installers (openagentinbox-install-X.Y.Z.sh). The
 # candidate must support upgrading from the previous release's version.
@@ -79,7 +79,7 @@ login_ok(){ [[ $(status /api/login "{\"username\":\"owner\",\"password\":\"$pass
 # the candidate twice: first in a transient unit on a private port (INBOX_PORT set),
 # then, if that passes, as the service on the default port. The preflight uses a private
 # INBOX_DATA and always passes through.
-#   early:    fail before opening the store (private phase)
+#   early:    fail in every phase, including the fresh-database preflight
 #   migrated: open and migrate the real store on a second port, wait until it answers,
 #             kill it, then fail (private phase). The installer never sees it healthy.
 #   late:     pass the private phase, fail as the service
@@ -95,10 +95,10 @@ forced_unpack(){
 #!/bin/bash
 export INBOX_UI="\$(dirname "\$(readlink -f "\$0")")/ui"
 real=$real/openagentinboxd
-if [[ \${INBOX_DATA:-} != /var/lib/openagentinbox || \${1:-} != serve ]]; then exec \$real "\$@"; fi
+if [[ $mode != early ]] && [[ \${INBOX_DATA:-} != /var/lib/openagentinbox || \${1:-} != serve ]]; then exec \$real "\$@"; fi
 port=\${INBOX_PORT:-4310}
 case $mode in
-  early) echo 'forced failure early: before opening the store' >&2; exit 1;;
+  early) echo 'forced failure early: the candidate cannot start' >&2; exit 1;;
   late)
     if [[ \$port == 4310 ]]; then echo 'forced failure late: after readiness was proven' >&2; exit 1; fi
     # Private phase. Record where the check listens, that the public port stays closed and
@@ -171,16 +171,37 @@ forced_failure(){
   fi
   failed_dir=$(ls -d /var/lib/openagentinbox/failed-upgrade-* | sort | tail -n 1)
   [[ -e $failed_dir/console.sqlite ]] || die "$mode: $failed_dir holds no store"
-  if [[ $mode == early ]]; then
-    [[ $(schema_digest "$failed_dir/console.sqlite") == "$digest_before" ]] || die "early: the candidate changed the store before it was meant to open it"
-  else
-    # Proof that migration really happened: the failed store's schema differs from the
-    # previous release's. If it does not, PREVIOUS already has the candidate's schema.
-    [[ $(schema_digest "$failed_dir/console.sqlite") != "$digest_before" ]] || die "$mode: the failed store has the previous schema, so no migration was exercised; use an older PREVIOUS installer"
-  fi
+  # Proof that migration really happened: the failed store's schema differs from the
+  # previous release's. If it does not, PREVIOUS already has the candidate's schema.
+  [[ $(schema_digest "$failed_dir/console.sqlite") != "$digest_before" ]] || die "$mode: the failed store has the previous schema, so no migration was exercised; use an older PREVIOUS installer"
 }
 
-forced_failure early 'forced failure early:'
+# early: the candidate cannot start, so the preflight must refuse it before the service is
+# touched. No restore is needed and none may happen.
+refused_early(){
+  local rc=0 pid_before digest_before failed_before snaps_before
+  echo 'forced failure early: the preflight must refuse the candidate and leave the service alone' >&2
+  pid_before=$(systemctl show -p MainPID --value openagentinbox.service)
+  digest_before=$(schema_digest /var/lib/openagentinbox/console.sqlite)
+  failed_before=$(count_matches '/var/lib/openagentinbox/failed-upgrade-*')
+  snaps_before=$(count_matches '/var/lib/openagentinbox/upgrade-snapshots/pre-*.sqlite')
+  forced_unpack early
+  bash "$work/forced/install-openagentinbox.sh" --upgrade >"$work/upgrade.out" 2>"$work/upgrade.err" || rc=$?
+  cat "$work/upgrade.err" >&2
+  [[ $rc != 0 ]] || die 'early: the upgrade with a candidate that cannot start reported success'
+  grep -Fq 'Candidate preflight failed. Current server is still serving.' "$work/upgrade.err" || die 'early: the installer did not report the preflight refusal'
+  ! grep -Fq 'Restored the previous running release' "$work/upgrade.err" || die 'early: a restore ran although nothing had been stopped'
+  systemctl is-active --quiet openagentinbox.service || die 'early: service is not active'
+  [[ $(systemctl show -p MainPID --value openagentinbox.service) == "$pid_before" ]] || die 'early: the service was restarted (MainPID changed)'
+  [[ $(version_of) == "$old" ]] || die "early: service does not answer on $old"
+  [[ $(readlink -e /opt/openagentinbox/active) == "$before_target" ]] || die 'early: active release changed'
+  login_ok || die 'early: owner login failed'
+  [[ $(schema_digest /var/lib/openagentinbox/console.sqlite) == "$digest_before" ]] || die 'early: the store schema changed'
+  [[ $(count_matches '/var/lib/openagentinbox/failed-upgrade-*') == "$failed_before" ]] || die 'early: a failed-upgrade directory was created'
+  [[ $(count_matches '/var/lib/openagentinbox/upgrade-snapshots/pre-*.sqlite') == "$snaps_before" ]] || die 'early: a snapshot was taken before the preflight passed'
+}
+
+refused_early
 forced_failure migrated 'forced failure migrated:'
 forced_failure late 'forced failure late:'
 
@@ -190,7 +211,7 @@ new=$(sed -n 's/^version=//p' "$work/forced/web/deploy/upgrade-native.sh")
 wait_version "$new" || die "unmodified candidate is not serving $new"
 login_ok || die 'owner login failed after the real upgrade'
 [[ $(count_matches '/var/lib/openagentinbox/upgrade-snapshots/pre-*.sqlite') -le 3 ]] || die 'old pre-upgrade copies were not pruned to three'
-[[ $(count_matches '/var/lib/openagentinbox/failed-upgrade-*') == 3 ]] || die 'a failed store was removed'
+[[ $(count_matches '/var/lib/openagentinbox/failed-upgrade-*') == 2 ]] || die 'a failed store was removed'
 
 printf '{"schema":"openagentinbox.upgrade-rollback/v2","status":"pass","variants":["early","migrated","late","real"],"previous_version":"%s","candidate_version":"%s","previous_installer_sha256":"%s","candidate_installer_sha256":"%s","arch":"%s"}\n' \
   "$old" "$new" "$(sha256sum <"$previous_installer" | cut -d' ' -f1)" "$(sha256sum <"$candidate_installer" | cut -d' ' -f1)" "$arch"
