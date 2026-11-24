@@ -264,11 +264,12 @@ refused_early(){
 # keep the active store and the copy, restore nothing, and say so. Then recover by hand
 # from the kept copy, which also proves the copy is usable.
 forced_accepted(){
-  local mode=$1 rc=0 failed_before snaps_before snap
+  local mode=$1 rc=0 failed_before snaps_before snap bad_rc by_hand_before
   echo "forced failure $mode: a write was accepted before the failure; nothing may be restored" >&2
   failed_before=$(count_matches '/var/lib/openagentinbox/failed-upgrade-*')
   snaps_before=$(count_matches '/var/lib/openagentinbox/upgrade-snapshots/pre-*.sqlite')
   rm -f /var/lib/openagentinbox/test-accepted-write.log
+  by_hand_before=$(count_matches '/var/lib/openagentinbox/failed-by-hand-*')
   forced_unpack "$mode"
   bash "$work/forced/install-openagentinbox.sh" --upgrade >"$work/upgrade.out" 2>"$work/upgrade.err" || rc=$?
   cat "$work/upgrade.err" >&2
@@ -284,13 +285,21 @@ forced_accepted(){
     grep -Eq '^private check ok port=[0-9]+ data=/var/lib/openagentinbox$' /var/lib/openagentinbox/test-private-check.log || die "late: the private check was not isolated: $(cat /var/lib/openagentinbox/test-private-check.log 2>/dev/null || echo 'no log')"
     ! grep -Fq 'port=4310' /var/lib/openagentinbox/test-private-check.log || die 'late: the private check listened on 4310'
   fi
-  # Run the manual steps the installer printed, exactly as printed.
-  sed -n '/^To go back to /,/^Run these as root/p' "$work/upgrade.err" | grep '^  ' > "$work/manual-restore.sh"
-  # The installer must print the copy's checksum, and the steps must verify it.
+  # Run the manual steps the installer printed, as an operator would: the printed text, one
+  # block, in plain bash with no -e added.
+  sed -n '/^  ($/,/^  )$/p' "$work/upgrade.err" > "$work/manual-restore.sh"
   grep -Fq 'sha256sum -c -' "$work/manual-restore.sh" || die "$mode: the manual steps do not verify the copy"
-  [[ $(wc -l < "$work/manual-restore.sh") -ge 6 ]] || die "$mode: the installer printed no manual restore steps"
+  [[ $(wc -l < "$work/manual-restore.sh") -ge 9 ]] || die "$mode: the installer printed no manual restore block"
+  # Negative case: a wrong checksum must stop everything after it. Nothing may move.
+  sed -E 's/[0-9a-f]{64}  /0000000000000000000000000000000000000000000000000000000000000000  /' "$work/manual-restore.sh" > "$work/manual-restore-bad.sh"
+  cmp -s "$work/manual-restore.sh" "$work/manual-restore-bad.sh" && die "$mode: could not build the wrong-checksum case"
+  bad_rc=0; bash "$work/manual-restore-bad.sh" >&2 || bad_rc=$?
+  [[ $bad_rc != 0 ]] || die "$mode: the printed steps went on after a wrong checksum"
+  [[ -e /var/lib/openagentinbox/console.sqlite ]] || die "$mode: the store moved after a wrong checksum"
+  [[ -z $(ls -d /var/lib/openagentinbox/failed-by-hand-* 2>/dev/null) || $(count_matches '/var/lib/openagentinbox/failed-by-hand-*') == "$by_hand_before" ]] || die "$mode: an archive was made after a wrong checksum"
+  [[ $(readlink -e /opt/openagentinbox/active) != "$before_target" ]] || die "$mode: the release was switched after a wrong checksum"
   systemctl reset-failed openagentinbox.service || true
-  bash -e "$work/manual-restore.sh" >&2 || die "$mode: the printed manual restore steps failed"
+  bash "$work/manual-restore.sh" >&2 || die "$mode: the printed manual restore block failed"
   wait_version "$old" || die "$mode: the previous release did not start from the kept copy"
   login_ok || die "$mode: owner login failed after recovery from the kept copy"
 }

@@ -249,14 +249,19 @@ The pre-upgrade copy is $snap
 Its sha256 is $snap_sha
 To fix forward, correct the cause and run: systemctl start $service
 To go back to $before and lose anything written since the copy, run as root:
-  systemctl stop $service
-  echo "$snap_sha  $snap" | sha256sum -c -
-  dest=$data/failed-by-hand-\$(date -u +%Y%m%dT%H%M%SZ)-\$\$; mkdir "\$dest"
-  for f in $db $db-wal $db-shm; do [ ! -e \$f ] || mv \$f "\$dest"/; done
-  install -m 0600 -o openagentinbox -g openagentinbox $snap $db
-  ln -sfn $previous $base/active
-  systemctl start $service
-The checksum line must print OK before anything moves; mkdir refuses a destination that exists, so a repeated run never overwrites an earlier archive.
+  (
+    set -eu
+    systemctl stop $service
+    echo "$snap_sha  $snap" | sha256sum -c -
+    dest=$data/failed-by-hand-\$(date -u +%Y%m%dT%H%M%SZ)-\$\$
+    mkdir "\$dest"
+    for f in $db $db-wal $db-shm; do [ ! -e \$f ] || mv \$f "\$dest"/; done
+    install -m 0600 -o openagentinbox -g openagentinbox $snap $db
+    ln -sfn $previous $base/active
+    systemctl start $service
+  )
+This is one block: paste it whole. It stops at the first failure, before anything after it runs, and leaves your shell open.
+The checksum must print OK before anything moves; mkdir refuses a destination that exists, so a repeated run never overwrites an earlier archive.
 Run these as root.
 MSG
   exit 1
