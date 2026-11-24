@@ -5,10 +5,10 @@
 #
 # Run as root on a DISPOSABLE Linux systemd host that has no OpenAgentInbox
 # installation. It installs the previous release and creates an owner, then runs
-# two forced failures in turn and finally the real upgrade:
-#   A. the candidate exits before it opens the store;
-#   B. the candidate opens and migrates the real store, then is killed and exits
-#      1, so the store is left in the candidate's schema under a failed upgrade.
+# three forced failures in turn and finally the real upgrade:
+#   early:    the candidate exits before it opens the store;
+#   migrated: the candidate migrates the real store, then is killed and exits 1;
+#   late:     the candidate passes its private-port check, then fails as the service.
 # After each failure the previous release must serve again from its pre-upgrade
 # store copy. The last step upgrades with the unmodified candidate.
 #
@@ -18,6 +18,7 @@
 # candidate must support upgrading from the previous release's version.
 # Stdout is one JSON receipt; the log goes to stderr. No secret is printed.
 set -euo pipefail
+shopt -s nullglob
 die(){ echo "FAIL: $*" >&2; exit 1; }
 [[ $EUID == 0 ]] || die 'run as root'
 [[ ${INBOX_ROLLBACK_TEST_DISPOSABLE:-} == yes ]] || die 'set INBOX_ROLLBACK_TEST_DISPOSABLE=yes to confirm this host is disposable'
@@ -66,14 +67,16 @@ code=''
 
 # The service user reads the store; root must not open it, or a root-owned -shm
 # file would be left behind.
-schema_objects(){
-  runuser -u openagentinbox -- python3 -I -c 'import sqlite3; c=sqlite3.connect("file:/var/lib/openagentinbox/console.sqlite?mode=ro",uri=True); print(c.execute("select count(*) from sqlite_master").fetchone()[0])'
-}
 login_ok(){ [[ $(status /api/login "{\"username\":\"owner\",\"password\":\"$password\"}") == 200 ]]; }
 
-# Install the candidate daemon behind a wrapper. $1 is the failure mode. The
-# preflight starts the wrapper with a private INBOX_DATA and always passes it
-# through; only a start against the service's data directory is made to fail.
+# Install the candidate daemon behind a wrapper. $1 is the failure mode. The upgrade runs
+# the candidate twice: first in a transient unit on a private port (INBOX_PORT set),
+# then, if that passes, as the service on the default port. The preflight uses a private
+# INBOX_DATA and always passes through.
+#   early:    fail before opening the store (private phase)
+#   migrated: open and migrate the real store on a second port, wait until it answers,
+#             kill it, then fail (private phase). The installer never sees it healthy.
+#   late:     pass the private phase, fail as the service
 forced_unpack(){
   local mode=$1 daemon
   rm -rf "$work/forced"
@@ -85,47 +88,77 @@ forced_unpack(){
   cat > "$daemon" <<WRAPPER
 #!/bin/bash
 export INBOX_UI="\$(dirname "\$(readlink -f "\$0")")/ui"
-if [[ \${INBOX_DATA:-} != /var/lib/openagentinbox || \${1:-} != serve ]]; then exec $real/openagentinboxd "\$@"; fi
-if [[ $mode == early ]]; then echo 'forced failure: before opening the store' >&2; exit 1; fi
-# Migrate the real store, then fail: the store is left in the candidate's schema.
-$real/openagentinboxd "\$@" &
-child=\$!
-for ((i=0;i<240;i++)); do
-  curl -fsS --max-time 1 http://127.0.0.1:4310/api/health 2>/dev/null | grep -Fq '"version"' && break
-  sleep 0.5
-done
-kill -9 "\$child" 2>/dev/null; wait "\$child" 2>/dev/null
-echo 'forced failure: migrated the store, then failed' >&2
-exit 1
+real=$real/openagentinboxd
+if [[ \${INBOX_DATA:-} != /var/lib/openagentinbox || \${1:-} != serve ]]; then exec \$real "\$@"; fi
+port=\${INBOX_PORT:-4310}
+case $mode in
+  early) echo 'forced failure early: before opening the store' >&2; exit 1;;
+  late)
+    if [[ \$port == 4310 ]]; then echo 'forced failure late: after readiness was proven' >&2; exit 1; fi
+    exec \$real "\$@";;
+  migrated)
+    if [[ \$port == 4310 ]]; then exec \$real "\$@"; fi
+    # Migrate the real store on another port so the installer's own readiness probe never
+    # sees this process. Wait until the migrated store answers before killing it.
+    other=\$((port + 1))
+    INBOX_PORT=\$other INBOX_DEPLOY_INSTANCE=none \$real "\$@" &
+    child=\$!
+    ready=0
+    for ((i=0;i<240;i++)); do
+      if curl -fsS --max-time 1 "http://127.0.0.1:\$other/api/health" 2>/dev/null | grep -Fq '"version"'; then ready=1; break; fi
+      kill -0 "\$child" 2>/dev/null || break
+      sleep 0.5
+    done
+    kill -9 "\$child" 2>/dev/null; wait "\$child" 2>/dev/null
+    if (( ready )); then echo 'forced failure migrated: migrated the store, then failed' >&2; else echo 'forced failure migrated: the candidate never became ready' >&2; fi
+    exit 1;;
+esac
 WRAPPER
   chmod 0755 "$daemon"
 }
 
+count_matches(){ local -a m=($1); echo "${#m[@]}"; }
+# Order-independent digest of the store's schema (table, index and trigger names).
+schema_digest(){
+  runuser -u openagentinbox -- python3 -I -c 'import sqlite3,hashlib,sys; c=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro",uri=True); print(hashlib.sha256("\n".join(sorted(r[0] for r in c.execute("select type||\":\"||name from sqlite_master"))).encode()).hexdigest())' "$1"
+}
+
 forced_failure(){
-  local mode=$1 marker=$2 rc=0 objects_before failed_before snaps_before
+  local mode=$1 marker=$2 rc=0 digest_before failed_before snaps_before failed_dir
   echo "forced failure $mode: upgrade with a candidate that fails; it must roll back" >&2
-  objects_before=$(schema_objects)
-  failed_before=$(compgen -G '/var/lib/openagentinbox/failed-upgrade-*' | wc -l)
-  snaps_before=$(compgen -G '/var/lib/openagentinbox/upgrade-snapshots/pre-*.sqlite' | wc -l)
+  digest_before=$(schema_digest /var/lib/openagentinbox/console.sqlite)
+  failed_before=$(count_matches '/var/lib/openagentinbox/failed-upgrade-*')
+  snaps_before=$(count_matches '/var/lib/openagentinbox/upgrade-snapshots/pre-*.sqlite')
   forced_unpack "$mode"
   bash "$work/forced/install-openagentinbox.sh" --upgrade >"$work/upgrade.out" 2>"$work/upgrade.err" || rc=$?
   cat "$work/upgrade.err" >&2
   [[ $rc != 0 ]] || die "$mode: the forced-failure upgrade reported success"
   grep -Fq 'Restored the previous running release and its data' "$work/upgrade.err" || die "$mode: installer did not report the restored release and data"
-  journalctl -u openagentinbox --no-pager 2>/dev/null | grep -Fq "$marker" || die "$mode: journal does not show the forced failure; the failure path did not run"
+  grep -Fq "forced failure $mode:" "$work/upgrade.err" || die "$mode: the installer's log excerpt does not show the forced failure; the failure path did not run"
+  [[ $mode != migrated ]] || grep -Fq 'migrated the store, then failed' "$work/upgrade.err" || die "migrated: the candidate never became ready, so the store was not migrated"
   systemctl is-active --quiet openagentinbox.service || die "$mode: service is not active after rollback"
   [[ $(version_of) == "$old" ]] || die "$mode: service does not answer on $old"
   [[ $(readlink -e /opt/openagentinbox/active) == "$before_target" ]] || die "$mode: active release is not the previous one"
   login_ok || die "$mode: owner login failed after rollback"
   [[ $(status /api/setup '{"username":"x","password":"another-long-password","code":"x"}') != 200 ]] || die "$mode: a fresh setup was accepted: data was lost"
   [[ $(status /api/login "{\"username\":\"owner\",\"password\":\"wrong-$password\"}") != 200 ]] || die "$mode: wrong password accepted"
-  [[ $(schema_objects) == "$objects_before" ]] || die "$mode: the restored store does not have the previous schema"
-  [[ $(compgen -G '/var/lib/openagentinbox/failed-upgrade-*' | wc -l) == $((failed_before + 1)) ]] || die "$mode: the failed store was not kept"
-  [[ $(compgen -G '/var/lib/openagentinbox/upgrade-snapshots/pre-*.sqlite' | wc -l) == $((snaps_before + 1)) ]] || die "$mode: no new pre-upgrade copy was kept"
+  [[ $(schema_digest /var/lib/openagentinbox/console.sqlite) == "$digest_before" ]] || die "$mode: the restored store does not have the previous schema"
+  [[ $(count_matches '/var/lib/openagentinbox/failed-upgrade-*') == $((failed_before + 1)) ]] || die "$mode: the failed store was not kept"
+  [[ $(count_matches '/var/lib/openagentinbox/upgrade-snapshots/pre-*.sqlite') == $((snaps_before + 1)) ]] || die "$mode: no new pre-upgrade copy was kept"
+  failed_dir=$(ls -d /var/lib/openagentinbox/failed-upgrade-* | sort | tail -n 1)
+  [[ -e $failed_dir/console.sqlite ]] || die "$mode: $failed_dir holds no store"
+  if [[ $mode == early ]]; then
+    [[ $(schema_digest "$failed_dir/console.sqlite") == "$digest_before" ]] || die "early: the candidate changed the store before it was meant to open it"
+  else
+    # Proof that migration really happened: the failed store's schema differs from the
+    # previous release's. If it does not, PREVIOUS already has the candidate's schema.
+    [[ $(schema_digest "$failed_dir/console.sqlite") != "$digest_before" ]] || die "$mode: the failed store has the previous schema, so no migration was exercised; use an older PREVIOUS installer"
+  fi
 }
 
-forced_failure early 'forced failure: before opening the store'
-forced_failure migrated 'forced failure: migrated the store, then failed'
+forced_failure early 'forced failure early:'
+forced_failure migrated 'forced failure migrated:'
+forced_failure late 'forced failure late:'
 
 echo 'upgrade with the unmodified candidate: the host must still upgrade' >&2
 bash "$candidate_installer" --upgrade >&2
@@ -133,5 +166,5 @@ new=$(sed -n 's/^version=//p' "$work/forced/web/deploy/upgrade-native.sh")
 wait_version "$new" || die "unmodified candidate is not serving $new"
 login_ok || die 'owner login failed after the real upgrade'
 
-printf '{"schema":"openagentinbox.upgrade-rollback/v2","status":"pass","variants":["early","migrated","real"],"previous_version":"%s","candidate_version":"%s","previous_installer_sha256":"%s","candidate_installer_sha256":"%s","arch":"%s"}\n' \
+printf '{"schema":"openagentinbox.upgrade-rollback/v2","status":"pass","variants":["early","migrated","late","real"],"previous_version":"%s","candidate_version":"%s","previous_installer_sha256":"%s","candidate_installer_sha256":"%s","arch":"%s"}\n' \
   "$old" "$new" "$(sha256sum <"$previous_installer" | cut -d' ' -f1)" "$(sha256sum <"$candidate_installer" | cut -d' ' -f1)" "$arch"

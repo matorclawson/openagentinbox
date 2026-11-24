@@ -57,10 +57,13 @@ cleanup(){
 trap cleanup EXIT
 runuser -u openagentinbox -- env -i PATH=/usr/bin:/bin HOME="$probe" INBOX_DATA="$probe" INBOX_PORT="$port" INBOX_DEPLOY_INSTANCE="$instance" "$release/openagentinboxd" serve >"$probe/log" 2>&1 9>&- &
 pid=$!
+# wait_health URL NEEDLE [UNIT]: poll until the page contains NEEDLE. With a UNIT, give up
+# early when that unit is no longer active instead of waiting out the full two minutes.
 wait_health(){
-  local target=$1 needle=$2 i
+  local target=$1 needle=$2 unit=${3:-} i
   for ((i=0;i<480;i++)); do
     if curl -fsS --max-time 1 "$target" 2>/dev/null | grep -Fq "$needle"; then return 0; fi
+    if [[ -n $unit && $i -ge 8 ]] && ! systemctl is-active --quiet "$unit"; then return 1; fi
     sleep 0.25
   done
   return 1
@@ -72,13 +75,25 @@ cleanup
 pid=''
 trap - EXIT
 activate(){ ln -s "$1" "$base/active.next.$$"; mv -Tf "$base/active.next.$$" "$base/active"; }
-# The candidate migrates the store on its first start. Keep a consistent copy so a
-# failed start can be undone together with the binary. The old service is stopped
-# first, so no message accepted before the stop is missing from the copy and none
-# can arrive between the copy and the switch.
 data=/var/lib/openagentinbox
 db=$data/console.sqlite
 snaps=$data/upgrade-snapshots
+check=openagentinbox-upgrade-check
+# confirm_stopped UNIT: stop it and prove it is gone (inactive or failed, no main process).
+confirm_stopped(){
+  local unit=$1 i
+  systemctl stop "$unit" 2>/dev/null || true
+  for ((i=0;i<120;i++)); do
+    case $(systemctl is-active "$unit" 2>/dev/null || true) in
+      inactive|failed|unknown) [[ $(systemctl show -p MainPID --value "$unit" 2>/dev/null || echo 0) == 0 ]] && return 0;;
+    esac
+    sleep 0.5
+  done
+  return 1
+}
+show_logs(){
+  journalctl -u "$check" -u "$service" --no-pager -n 30 -o cat 2>/dev/null | sed 's/^/  | /' >&2 || true
+}
 [[ -f $db ]] || { echo "No store at $db. Current server is still serving." >&2; exit 1; }
 used=$(( $(stat -c %s "$db") + $(stat -c %s "$db-wal" 2>/dev/null || echo 0) ))
 avail=$(df --output=avail -B1 "$data" | tail -n 1)
@@ -86,26 +101,59 @@ avail=$(df --output=avail -B1 "$data" | tail -n 1)
 install -d -m 0700 -o openagentinbox -g openagentinbox "$snaps"
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 snap="$snaps/pre-$before-to-$version-$stamp.sqlite"
-systemctl stop "$service"
+failed="$data/failed-upgrade-$stamp"
+# From here the store may change, so the previous service stops first and must be
+# confirmed gone. No message accepted before the stop is missing from the copy, and none
+# can arrive between the copy and the switch.
+if ! confirm_stopped "$service"; then
+  systemctl start "$service" || true
+  echo 'Could not confirm the previous service stopped. Nothing was changed.' >&2
+  exit 1
+fi
 if ! runuser -u openagentinbox -- "$release/openagentinboxd" snapshot "$db" "$snap" >/dev/null; then
   systemctl start "$service" || true
   echo 'Could not take the pre-upgrade copy. The store is unchanged; restarted the previous release.' >&2
   exit 1
 fi
-activate "$release"
-if systemctl start "$service" && wait_health "$health" '"version":"0.12.11"'; then
-  echo "Serving $version. Previous release retained at $previous. Pre-upgrade copy: $snap"
-else
-  systemctl stop "$service" || true
-  failed="$data/failed-upgrade-$stamp"
+# Undo a failed upgrade: confirm nothing else holds the store, keep the failed store for
+# reconciliation, restore the copy by atomic rename, and start the previous release.
+rollback(){
+  show_logs
+  if ! confirm_stopped "$check" || ! confirm_stopped "$service"; then
+    echo "Could not confirm the upgrade processes stopped, so the store was not touched. The pre-upgrade copy is $snap. Stop openagentinbox.service and $check.service, then restore it by hand." >&2
+    exit 1
+  fi
   install -d -m 0700 -o openagentinbox -g openagentinbox "$failed"
+  install -m 0600 -o openagentinbox -g openagentinbox "$snap" "$data/.restore.$stamp"
   for f in "$db" "$db-wal" "$db-shm"; do [[ ! -e $f ]] || mv -f "$f" "$failed/"; done
-  install -m 0600 -o openagentinbox -g openagentinbox "$snap" "$db"
+  mv -T "$data/.restore.$stamp" "$db"
   activate "$previous"
-  if systemctl start "$service" && wait_health "$health" "\"version\":\"$before\""; then
-    echo "Upgrade failed. Restored the previous running release and its data from $snap. The failed store is kept in $failed." >&2
+  if systemctl start "$service" && wait_health "$health" "\"version\":\"$before\"" "$service"; then
+    echo "Upgrade failed. Restored the previous running release and its data from $snap. The failed store is kept in $failed; it holds anything the candidate wrote after the copy." >&2
   else
     echo "Rollback readiness failed. The pre-upgrade copy is $snap and the failed store is in $failed. Inspect journalctl -u openagentinbox." >&2
   fi
   exit 1
+}
+# Start the candidate against the real store on a private loopback port, in a transient
+# unit with the service's account, environment files and sandbox. Nothing reaches it
+# through the public listener or the reverse proxy until it has migrated the store and
+# answered. A candidate that fails here is rolled back before it could accept public writes.
+cport=$((20000 + RANDOM % 20000))
+cinstance=$(cat /proc/sys/kernel/random/uuid)
+systemd-run --quiet --unit="$check" --collect --property=User=openagentinbox --property=Group=openagentinbox \
+  --property=WorkingDirectory="$release" --property=UMask=0077 --property=NoNewPrivileges=yes --property=PrivateTmp=yes \
+  --property=ProtectHome=yes --property=ProtectSystem=strict --property=ReadWritePaths="$data" \
+  --property=Environment=INBOX_DATA="$data" --property=EnvironmentFile=/etc/openagentinbox/origin.env \
+  --property=EnvironmentFile=-/etc/openagentinbox/settings.env \
+  --property=Environment=INBOX_PORT="$cport" --property=Environment=INBOX_DEPLOY_INSTANCE="$cinstance" \
+  "$release/openagentinboxd" serve || rollback
+wait_health "http://127.0.0.1:$cport/api/health" "$cinstance" "$check" &&
+curl -fsS --max-time 3 "http://127.0.0.1:$cport/api/health" | grep -Fq '"version":"0.12.11"' || rollback
+confirm_stopped "$check" || rollback
+activate "$release"
+if systemctl start "$service" && wait_health "$health" '"version":"0.12.11"' "$service"; then
+  echo "Serving $version. Previous release retained at $previous. Pre-upgrade copy: $snap"
+else
+  rollback
 fi

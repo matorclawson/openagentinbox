@@ -156,3 +156,33 @@ func TestConversationMigrationAndFolderIsolation(t *testing.T) {
 		t.Fatal("internet reply", e)
 	}
 }
+
+type forbiddenDNS struct{ t *testing.T }
+
+func (f forbiddenDNS) LookupTXT(context.Context, string) ([]string, error) {
+	f.t.Helper()
+	f.t.Fatal("unexpected DNS lookup")
+	return nil, nil
+}
+func (f forbiddenDNS) LookupHost(context.Context, string) ([]string, error) {
+	f.t.Fatal("unexpected DNS lookup")
+	return nil, nil
+}
+func (f forbiddenDNS) LookupMX(context.Context, string) ([]*net.MX, error) {
+	f.t.Fatal("unexpected DNS lookup")
+	return nil, nil
+}
+
+func TestActivationWithoutAMailEdgeMakesNoDNSLookup(t *testing.T) {
+	s := setupWorkspace(t)
+	if _, e := s.saveDomain(nil, httptest.NewRequest("POST", "/", strings.NewReader(`{"domain":"agents.example","ip":"192.0.2.10"}`))); e != nil {
+		t.Fatal(e)
+	}
+	s.email = nil
+	s.resolver = forbiddenDNS{t}
+	req := httptest.NewRequest("POST", "/", nil)
+	req.SetPathValue("domain", "agents.example")
+	if _, e := s.activateDomain(nil, req); e == nil {
+		t.Fatal("activation succeeded without a mail edge")
+	}
+}

@@ -243,20 +243,44 @@ func (s *server) domainChecks(r *http.Request) (domainPlan, []dnsRecord, error) 
 	}
 	return p, records, nil
 }
+
+// ownerProved reports whether exactly one ownership TXT record carries the plan's proof.
+func ownerProved(ctx context.Context, p domainPlan, res dnsResolver) bool {
+	txt, e := res.LookupTXT(ctx, "_openagentinbox."+p.Domain+".")
+	if e != nil {
+		return false
+	}
+	n := 0
+	for _, t := range txt {
+		if t == "openagentinbox="+p.Proof {
+			n++
+		}
+	}
+	return n == 1
+}
 func (s *server) checkDomain(_ http.ResponseWriter, r *http.Request) (any, error) {
 	_, records, e := s.domainChecks(r)
 	return object{"records": records}, e
 }
+
+// activateDomain checks the mail edge first so a request that cannot succeed makes no DNS
+// lookup, then re-verifies only the ownership record, the one proof activation needs.
 func (s *server) activateDomain(_ http.ResponseWriter, r *http.Request) (any, error) {
-	p, records, e := s.domainChecks(r)
+	if s.email == nil {
+		return nil, failure{409, "Connect the mail server first"}
+	}
+	p, e := s.plan(r)
 	if e != nil {
 		return nil, e
 	}
-	if !records[0].OK {
-		return nil, failure{409, "Publish the ownership TXT record, then try again"}
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	dns := s.resolver
+	if dns == nil {
+		dns = net.DefaultResolver
 	}
-	if s.email == nil {
-		return nil, failure{409, "Connect the mail server first"}
+	if !ownerProved(ctx, p, dns) {
+		return nil, failure{409, "Publish the ownership TXT record, then try again"}
 	}
 	res, e := s.db.ExecContext(r.Context(), "UPDATE mail_domains SET active=1 WHERE domain=? AND mx=? AND ip=? AND proof=?", p.Domain, p.MX, p.IP, p.Proof)
 	if e != nil {

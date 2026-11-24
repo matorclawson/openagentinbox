@@ -16,8 +16,8 @@ Cumulative council return since 0.10.4 (application 38164e1, documentation a5395
 - 0.12.2: corpus-shaped load replay.
 
 ### Changed
-- `--upgrade` takes an integrity-checked copy of the store while the service is stopped, and a failed start restores that copy together with the previous release. The failed store is kept. `openagentinboxd snapshot DATABASE NEW-FILE` writes such a copy of any live store.
-- Mail setup queries DNS only when the owner presses Check DNS. Selecting a domain makes no lookup.
+- `--upgrade` takes an integrity-checked copy of the store while the service is stopped, and a failed start restores that copy together with the previous release. The candidate first runs against the real store on a private loopback port, so it accepts no public writes until it has migrated the store and answered. The installer moves or restores store files only after confirming both units stopped. The failed store is kept. `openagentinboxd snapshot DATABASE NEW-FILE` writes such a copy of any live store.
+- Mail setup queries DNS only when the owner presses Check DNS. Selecting a domain makes no lookup. Activating receiving checks the mail edge first, then looks up only the ownership record.
 - The vendored Ephemeral is the released 0.3.0 (upstream commit c250ba20, with its MIT LICENSE) in place of the candidate. Its idempotent-start request fingerprint format differs from the candidate.
 - 0.11.0: portable Ephemeral updated to the 0.3.0 candidate for idempotent backup starts and indexed recovery.
 - 0.12.2: subjects stay readable when agents embed envelope fields in the body; the opposite-folder thread lookup uses the existing index.
