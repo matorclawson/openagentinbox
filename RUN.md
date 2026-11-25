@@ -41,8 +41,11 @@ both exports (the build tree and the source zip) derive from that commit, never 
 It builds in a work directory whose path depends only on the commit (`$TMPDIR/openagentinbox-release-COMMIT`, created with `mkdir`; a leftover is refused, never reused), so a tool that embeds an absolute path gives the same bytes every time, with `npm ci` from the lockfile, `GOTOOLCHAIN=local` and
 read-only Go modules, and fails if HEAD or the tree moved during the build. The output must be
 a new name directly under `build/` (which must exist): the directory is claimed with one
-`mkdir`, so two builds cannot share it, and `tests/release-outdir.sh`, part of `make verify-go`,
-checks the guard. Remove an old build yourself before reusing its name. `MANIFEST.json` records
+`mkdir`, so two builds cannot share it, and three tests in `make verify-go` check it: `tests/release-outdir.sh` (the output guard),
+`tests/release-package.sh` (the installer and wheel are packaged to the same bytes from the same
+files, with Python's standard library only, no `tar` or `gzip` binary) and
+`tests/release-source-time.sh` (the source-zip check under several time zones; the build runs
+with `TZ=UTC` because `git archive` writes zip times in local time). Remove an old build yourself before reusing its name. `MANIFEST.json` records
 the commit, the tree, the source date, the sha256 of the exported source tar, the toolchain
 versions, the lockfile and `go.sum` hashes, each file's sha256 and the sha256 of every file inside the installer payload (so a failed `make release-check` shows which file differs in the manifest diff), with no time or host name; the
 build fails unless the source zip carries the commit id, the commit time and exactly the
