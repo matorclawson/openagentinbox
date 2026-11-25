@@ -30,14 +30,22 @@ If the browser journey fails after opening a page, retain
 
 ## Release artifacts
 
-`make release` builds the artifacts on ENG-UK from a clean commit into `build/release/`: the
+`make release` builds the artifacts on ENG-UK into a new directory `build/release-COMMIT`: the
 installer `openagentinbox-install-VERSION.sh`, `openagentinbox-VERSION-source.zip`, the clients
-for linux-arm64, linux-amd64 and darwin-arm64, the Python wheel and `SHA256SUMS`. It prints the
-toolchain versions, the commit and every checksum. The inputs are the commit and the pinned
-toolchains: archive times come from the commit time, the Go binaries use `-trimpath` and no
+for linux-arm64, linux-amd64 and darwin-arm64, the Python wheel, `MANIFEST.json` and
+`SHA256SUMS`. It prints the toolchain versions, the commit and every checksum.
+
+The build never touches the working tree and never deletes a path it was given. It refuses a
+dirty tree (there is no override), exports the exact commit with `git archive` into a
+temporary directory, and builds there with `npm ci` from the lockfile, `GOTOOLCHAIN=local` and
+read-only Go modules. The output directory must be new or empty and inside `build/`
+(`tests/release-outdir.sh`, part of `make verify-go`, checks the guard); remove an old build
+yourself before reusing its name. `MANIFEST.json` records the commit, the tree, the
+toolchain versions, the lockfile and `go.sum` hashes and each file's sha256, with no time or
+host name. Archive times come from the commit time, the Go binaries use `-trimpath` and no
 build id, and the Next build id is the commit. `make release-check` builds twice and fails
-unless both `SHA256SUMS` files match, so a reproducibility claim needs a receipt from it.
-Publish the files and `SHA256SUMS` unchanged with the tag.
+unless both `SHA256SUMS` match, so a reproducibility claim needs a receipt from it. Publish the
+files, `MANIFEST.json` and `SHA256SUMS` unchanged with the tag.
 
 Build web release archives on ENG-UK. Test deployable Go services on their
 target OS and architecture. Run Darwin tools on ENG-UK. The small VPSes

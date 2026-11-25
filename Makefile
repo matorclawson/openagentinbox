@@ -34,6 +34,7 @@ verify-go: check-go-venue
 	go vet ./...
 	cd third_party/dostoevsky && go test ./... && go vet ./...
 	bash tests/roster-apply.sh
+	bash tests/release-outdir.sh
 	bash scripts/build-clients.sh dist/ui
 
 verify-web: check-web-venue
@@ -55,13 +56,17 @@ verify-harness: check-go-venue
 	go build -o build/openagentinbox-client ./cmd/openagentinbox-client
 	INBOX_DAEMON="$(CURDIR)/build/openagentinboxd" INBOX_CLIENT="$(CURDIR)/build/openagentinbox-client" $(PYTHON) tests/harnesses.py
 
-# Release artifacts, built on ENG-UK from a clean commit into build/release. See
-# scripts/build-release.sh. release-check builds twice and fails unless every file matches.
+# Release artifacts, built on ENG-UK from a clean working tree and the exact committed tree.
+# Each build needs a NEW directory under build/ (see scripts/release-outdir.sh); nothing is
+# ever deleted, so remove an old build/release-* directory yourself before reusing a name.
+# release-check builds twice and fails unless every checksum, MANIFEST.json included, matches.
+COMMIT = $(shell git rev-parse --short=12 HEAD)
+
 release: check-web-venue
-	bash scripts/build-release.sh build/release
+	bash scripts/build-release.sh build/release-$(COMMIT)
 
 release-check: check-web-venue
-	bash scripts/build-release.sh build/release-a
-	bash scripts/build-release.sh build/release-b
-	diff build/release-a/SHA256SUMS build/release-b/SHA256SUMS
+	bash scripts/build-release.sh build/release-check-$(COMMIT)-a
+	bash scripts/build-release.sh build/release-check-$(COMMIT)-b
+	diff build/release-check-$(COMMIT)-a/SHA256SUMS build/release-check-$(COMMIT)-b/SHA256SUMS
 	@echo 'reproducible: both builds have identical checksums'
