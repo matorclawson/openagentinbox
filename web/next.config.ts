@@ -4,5 +4,6 @@ const config: NextConfig = {
   poweredByHeader: false,
   devIndicators: false,
   experimental: { cpus: 2 },
+  generateBuildId: async () => process.env.INBOX_BUILD_ID || null,
 };
 export default config;
