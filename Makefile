@@ -3,7 +3,7 @@ export CHROME_PATH
 
 PYTHON ?= python3
 
-.PHONY: verify verify-go verify-web verify-harness check-go-venue check-web-venue
+.PHONY: verify verify-go verify-web verify-harness release release-check check-go-venue check-web-venue
 
 # Full verification requires a receipt from each venue. Dispatch only the
 # portion eligible to run on the current machine.
@@ -54,3 +54,14 @@ verify-harness: check-go-venue
 	go build -o build/openagentinboxd ./cmd/openagentinboxd
 	go build -o build/openagentinbox-client ./cmd/openagentinbox-client
 	INBOX_DAEMON="$(CURDIR)/build/openagentinboxd" INBOX_CLIENT="$(CURDIR)/build/openagentinbox-client" $(PYTHON) tests/harnesses.py
+
+# Release artifacts, built on ENG-UK from a clean commit into build/release. See
+# scripts/build-release.sh. release-check builds twice and fails unless every file matches.
+release: check-web-venue
+	bash scripts/build-release.sh build/release
+
+release-check: check-web-venue
+	bash scripts/build-release.sh build/release-a
+	bash scripts/build-release.sh build/release-b
+	diff build/release-a/SHA256SUMS build/release-b/SHA256SUMS
+	@echo 'reproducible: both builds have identical checksums'

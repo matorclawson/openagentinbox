@@ -28,6 +28,17 @@ If the browser journey fails after opening a page, retain
 `build/browser-failure.png` alongside the run log. Set
 `INBOX_BROWSER_FAILURE_SCREENSHOT` to direct it to a different path.
 
+## Release artifacts
+
+`make release` builds the artifacts on ENG-UK from a clean commit into `build/release/`: the
+installer `openagentinbox-install-VERSION.sh`, `openagentinbox-VERSION-source.zip`, the clients
+for linux-arm64, linux-amd64 and darwin-arm64, the Python wheel and `SHA256SUMS`. It prints the
+toolchain versions, the commit and every checksum. The inputs are the commit and the pinned
+toolchains: archive times come from the commit time, the Go binaries use `-trimpath` and no
+build id, and the Next build id is the commit. `make release-check` builds twice and fails
+unless both `SHA256SUMS` files match, so a reproducibility claim needs a receipt from it.
+Publish the files and `SHA256SUMS` unchanged with the tag.
+
 Build web release archives on ENG-UK. Test deployable Go services on their
 target OS and architecture. Run Darwin tools on ENG-UK. The small VPSes
 are for load, concurrency and soak measurements. Do not build or test
