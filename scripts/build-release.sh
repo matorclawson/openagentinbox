@@ -23,7 +23,7 @@ commit=$(git rev-parse --verify 'HEAD^{commit}')
 tree=$(git rev-parse --verify "$commit^{tree}")
 epoch=$(git log -1 --format=%ct "$commit")
 out=$(bash scripts/release-outdir.sh "$out_arg")
-export SOURCE_DATE_EPOCH=$epoch INBOX_BUILD_ID=${commit:0:12} NEXT_TELEMETRY_DISABLED=1
+export TZ=UTC SOURCE_DATE_EPOCH=$epoch INBOX_BUILD_ID=${commit:0:12} NEXT_TELEMETRY_DISABLED=1
 export GOFLAGS=-mod=readonly GOTOOLCHAIN=local CGO_ENABLED=0
 # The build runs in a work directory whose path depends only on the commit, so a tool that embeds
 # an absolute path gives the same bytes on every build. It is created with mkdir, never reused:

@@ -36,6 +36,7 @@ verify-go: check-go-venue
 	bash tests/roster-apply.sh
 	bash tests/release-outdir.sh
 	bash tests/release-package.sh
+	bash tests/release-source-time.sh
 	bash scripts/build-clients.sh dist/ui
 
 verify-web: check-web-venue
