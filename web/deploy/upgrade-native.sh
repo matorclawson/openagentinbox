@@ -48,15 +48,19 @@ chmod -R a+rX "$release"
 # Start under the service account with a fresh private database on loopback.
 probe=$(mktemp -d)
 chown openagentinbox:openagentinbox "$probe"
+# The candidate's output goes to a root-owned directory, through a descriptor root opens before
+# the service account's process starts. Nothing the candidate does inside its own data directory
+# (a link, a FIFO) can change what root later reads.
+plog=$(mktemp -d)
 port=$((20000 + RANDOM % 20000))
 instance=$(cat /proc/sys/kernel/random/uuid)
 pid=''
 cleanup(){
   if [[ -n $pid ]]; then kill "$pid" 2>/dev/null || true; wait "$pid" || true; fi
-  rm -rf -- "$probe"
+  rm -rf -- "$probe" "$plog"
 }
 trap cleanup EXIT
-runuser -u openagentinbox -- env -i PATH=/usr/bin:/bin HOME="$probe" INBOX_DATA="$probe" INBOX_PORT="$port" INBOX_DEPLOY_INSTANCE="$instance" "$release/openagentinboxd" serve >"$probe/log" 2>&1 9>&- &
+runuser -u openagentinbox -- env -i PATH=/usr/bin:/bin HOME="$probe" INBOX_DATA="$probe" INBOX_PORT="$port" INBOX_DEPLOY_INSTANCE="$instance" "$release/openagentinboxd" serve >"$plog/log" 2>&1 9>&- &
 pid=$!
 # wait_health URL NEEDLE [UNIT]: poll until the page contains NEEDLE. With a UNIT, give up
 # early when that unit is no longer active instead of waiting out the full two minutes.
@@ -71,7 +75,13 @@ wait_health(){
 }
 wait_health "http://127.0.0.1:$port/api/health" "$instance" &&
 curl -fsS --max-time 3 "http://127.0.0.1:$port/api/health" | grep -Fq '"version":"0.12.12"' &&
-curl -fsS --max-time 3 -o /dev/null "http://127.0.0.1:$port/inboxes/operator" || { echo 'Candidate preflight failed. Current server is still serving.' >&2; exit 1; }
+curl -fsS --max-time 3 -o /dev/null "http://127.0.0.1:$port/inboxes/operator" || {
+  echo 'Candidate preflight failed. Current server is still serving.' >&2
+  # The log is root's own regular file. Show a bounded printable excerpt. The daemon logs the
+  # path of its setup code, never the code.
+  { echo '  candidate output:'; tail -c 4096 "$plog/log" 2>/dev/null | tr -cd '[:print:]\n' | tail -n 20 | sed 's/^/  | /'; } >&2 || true
+  exit 1
+}
 cleanup
 pid=''
 trap - EXIT

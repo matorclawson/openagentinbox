@@ -25,7 +25,15 @@
 # Stdout is one JSON receipt; the log goes to stderr. No secret is printed.
 set -euo pipefail
 shopt -s nullglob
-die(){ echo "FAIL: $*" >&2; exit 1; }
+die(){
+  echo "FAIL: $*" >&2
+  # Never leave a failure unexplained: show what the installer said last.
+  local f
+  for f in "${work:-/nonexistent}/upgrade.err" "${work:-/nonexistent}/upgrade.out"; do
+    [[ ! -s $f ]] || { echo "--- last lines of $(basename "$f")" >&2; tail -n 40 "$f" >&2; }
+  done
+  exit 1
+}
 [[ $EUID == 0 ]] || die 'run as root'
 [[ ${INBOX_ROLLBACK_TEST_DISPOSABLE:-} == yes ]] || die 'set INBOX_ROLLBACK_TEST_DISPOSABLE=yes to confirm this host is disposable'
 [[ $# == 2 && -f $1 && -f $2 ]] || die 'usage: upgrade-rollback.sh PREVIOUS-INSTALLER CANDIDATE-INSTALLER'
@@ -96,15 +104,25 @@ forced_unpack(){
   daemon="$work/forced/dist/linux-$arch/openagentinboxd"
   [[ -x $daemon ]] || die "candidate has no linux-$arch daemon"
   install -d -m 0755 "$real"
-  [[ -x $real/openagentinboxd ]] || cp "$daemon" "$real/openagentinboxd"
+  # The service account runs this copy, so it must be readable and executable by it whatever
+  # mode the packaged daemon has (a payload built under umask 077 is mode 0700).
+  [[ -x $real/openagentinboxd ]] || install -m 0755 "$daemon" "$real/openagentinboxd"
   cat > "$daemon" <<WRAPPER
 #!/bin/bash
 export INBOX_UI="\$(dirname "\$(readlink -f "\$0")")/ui"
 real=$real/openagentinboxd
-if [[ $mode != early ]] && [[ \${INBOX_DATA:-} != /var/lib/openagentinbox || \${1:-} != serve ]]; then exec \$real "\$@"; fi
+if [[ $mode != early && $mode != hostile ]] && [[ \${INBOX_DATA:-} != /var/lib/openagentinbox || \${1:-} != serve ]]; then exec \$real "\$@"; fi
 port=\${INBOX_PORT:-4310}
 case $mode in
-  early) echo 'forced failure early: the candidate cannot start' >&2; exit 1;;
+  early)
+    # Also try to plant a symbolic link where the installer's old log lived: it must not be followed.
+    rm -f "\${INBOX_DATA:-/nonexistent}/log" 2>/dev/null; ln -s $work/planted-secret "\${INBOX_DATA:-/nonexistent}/log" 2>/dev/null || true
+    echo 'forced failure early: the candidate cannot start' >&2; exit 1;;
+  hostile)
+    # A FIFO where a reader would hang, and a link to a file only root can read.
+    rm -f "\${INBOX_DATA:-/nonexistent}/log" 2>/dev/null; mkfifo "\${INBOX_DATA:-/nonexistent}/log" 2>/dev/null || true
+    ln -s $work/planted-secret "\${INBOX_DATA:-/nonexistent}/log.link" 2>/dev/null || true
+    echo 'forced failure hostile: the candidate cannot start' >&2; exit 1;;
   late)
     if [[ \$port == 4310 ]]; then echo 'forced failure late: after readiness was proven' >&2; exit 1; fi
     # Private phase. Write the marker synchronously, before the daemon can serve health, so it
@@ -238,26 +256,31 @@ forced_failure(){
 # early: the candidate cannot start, so the preflight must refuse it before the service is
 # touched. No restore is needed and none may happen.
 refused_early(){
+  local mode=${1:-early}
   local rc=0 pid_before digest_before failed_before snaps_before
-  echo 'forced failure early: the preflight must refuse the candidate and leave the service alone' >&2
+  echo "forced failure $mode: the preflight must refuse the candidate and leave the service alone" >&2
   pid_before=$(systemctl show -p MainPID --value openagentinbox.service)
   digest_before=$(schema_digest /var/lib/openagentinbox/console.sqlite)
   failed_before=$(count_matches '/var/lib/openagentinbox/failed-upgrade-*')
   snaps_before=$(count_matches '/var/lib/openagentinbox/upgrade-snapshots/pre-*.sqlite')
-  forced_unpack early
-  bash "$work/forced/install-openagentinbox.sh" --upgrade >"$work/upgrade.out" 2>"$work/upgrade.err" || rc=$?
+  printf 'PLANTED-SECRET-MARKER\n' > "$work/planted-secret"; chmod 0600 "$work/planted-secret"
+  forced_unpack "$mode"
+  timeout 180 bash "$work/forced/install-openagentinbox.sh" --upgrade >"$work/upgrade.out" 2>"$work/upgrade.err" || rc=$?
+  [[ $rc != 124 ]] || die "$mode: the installer hung reading the candidate's log"
   cat "$work/upgrade.err" >&2
-  [[ $rc != 0 ]] || die 'early: the upgrade with a candidate that cannot start reported success'
-  grep -Fq 'Candidate preflight failed. Current server is still serving.' "$work/upgrade.err" || die 'early: the installer did not report the preflight refusal'
-  ! grep -Fq 'Restored the previous running release' "$work/upgrade.err" || die 'early: a restore ran although nothing had been stopped'
-  systemctl is-active --quiet openagentinbox.service || die 'early: service is not active'
-  [[ $(systemctl show -p MainPID --value openagentinbox.service) == "$pid_before" ]] || die 'early: the service was restarted (MainPID changed)'
+  ! grep -Fq 'PLANTED-SECRET-MARKER' "$work/upgrade.err" "$work/upgrade.out" || die "$mode: the installer printed the contents of a file a planted link pointed at"
+  grep -Fq "forced failure $mode: the candidate cannot start" "$work/upgrade.err" || die "$mode: the failed preflight did not show the candidate's own output"
+  [[ $rc != 0 ]] || die "$mode: the upgrade with a candidate that cannot start reported success"
+  grep -Fq 'Candidate preflight failed. Current server is still serving.' "$work/upgrade.err" || die "$mode: the installer did not report the preflight refusal"
+  ! grep -Fq 'Restored the previous running release' "$work/upgrade.err" || die "$mode: a restore ran although nothing had been stopped"
+  systemctl is-active --quiet openagentinbox.service || die "$mode: service is not active"
+  [[ $(systemctl show -p MainPID --value openagentinbox.service) == "$pid_before" ]] || die "$mode: the service was restarted (MainPID changed)"
   [[ $(version_of) == "$old" ]] || die "early: service does not answer on $old"
-  [[ $(readlink -e /opt/openagentinbox/active) == "$before_target" ]] || die 'early: active release changed'
-  login_ok || die 'early: owner login failed'
-  [[ $(schema_digest /var/lib/openagentinbox/console.sqlite) == "$digest_before" ]] || die 'early: the store schema changed'
-  [[ $(count_matches '/var/lib/openagentinbox/failed-upgrade-*') == "$failed_before" ]] || die 'early: a failed-upgrade directory was created'
-  [[ $(count_matches '/var/lib/openagentinbox/upgrade-snapshots/pre-*.sqlite') == "$snaps_before" ]] || die 'early: a snapshot was taken before the preflight passed'
+  [[ $(readlink -e /opt/openagentinbox/active) == "$before_target" ]] || die "$mode: active release changed"
+  login_ok || die "$mode: owner login failed"
+  [[ $(schema_digest /var/lib/openagentinbox/console.sqlite) == "$digest_before" ]] || die "$mode: the store schema changed"
+  [[ $(count_matches '/var/lib/openagentinbox/failed-upgrade-*') == "$failed_before" ]] || die "$mode: a failed-upgrade directory was created"
+  [[ $(count_matches '/var/lib/openagentinbox/upgrade-snapshots/pre-*.sqlite') == "$snaps_before" ]] || die "$mode: a snapshot was taken before the preflight passed"
 }
 
 # accepted: the public listener accepted a write before the failure. The installer must
@@ -304,7 +327,8 @@ forced_accepted(){
   login_ok || die "$mode: owner login failed after recovery from the kept copy"
 }
 
-refused_early
+refused_early early
+refused_early hostile
 forced_failure migrated 'forced failure migrated:'
 # The private check must not inherit any mail transport: configure all of them for this variant.
 printf 'INBOX_EMAIL_DOMAIN=inbox.test\nINBOX_EMAIL_SOCKET=/run/oai-test-lmtp.sock\nINBOX_EMAIL_RELAY=127.0.0.1:2525\nINBOX_EMAIL_SENDERS=operator\n' >> /etc/openagentinbox/settings.env
@@ -321,5 +345,5 @@ login_ok || die 'owner login failed after the real upgrade'
 [[ $(count_matches '/var/lib/openagentinbox/upgrade-snapshots/pre-*.sqlite') -le 3 ]] || die 'old pre-upgrade copies were not pruned to three'
 [[ $(count_matches '/var/lib/openagentinbox/failed-upgrade-*') == 1 ]] || die 'a failed store was removed'
 
-printf '{"schema":"openagentinbox.upgrade-rollback/v2","status":"pass","variants":["early","migrated","late","accepted","direct","real"],"previous_version":"%s","candidate_version":"%s","previous_installer_sha256":"%s","candidate_installer_sha256":"%s","arch":"%s"}\n' \
+printf '{"schema":"openagentinbox.upgrade-rollback/v2","status":"pass","variants":["early","hostile","migrated","late","accepted","direct","real"],"previous_version":"%s","candidate_version":"%s","previous_installer_sha256":"%s","candidate_installer_sha256":"%s","arch":"%s"}\n' \
   "$old" "$new" "$(sha256sum <"$previous_installer" | cut -d' ' -f1)" "$(sha256sum <"$candidate_installer" | cut -d' ' -f1)" "$arch"
