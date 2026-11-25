@@ -36,14 +36,18 @@ for linux-arm64, linux-amd64 and darwin-arm64, the Python wheel, `MANIFEST.json`
 `SHA256SUMS`. It prints the toolchain versions, the commit and every checksum.
 
 The build never touches the working tree and never deletes a path it was given. It refuses a
-dirty tree (there is no override), exports the exact commit with `git archive` into a
-temporary directory, and builds there with `npm ci` from the lockfile, `GOTOOLCHAIN=local` and
-read-only Go modules. The output directory must be new or empty and inside `build/`
-(`tests/release-outdir.sh`, part of `make verify-go`, checks the guard); remove an old build
-yourself before reusing its name. `MANIFEST.json` records the commit, the tree, the
-toolchain versions, the lockfile and `go.sum` hashes and each file's sha256, with no time or
-host name. Archive times come from the commit time, the Go binaries use `-trimpath` and no
-build id, and the Next build id is the commit. `make release-check` builds twice and fails
+dirty tree (there is no override) and captures the commit once; the tree, the source date and
+both exports (the build tree and the source zip) derive from that commit, never from HEAD again.
+It builds in a temporary export with `npm ci` from the lockfile, `GOTOOLCHAIN=local` and
+read-only Go modules, and fails if HEAD or the tree moved during the build. The output must be
+a new name directly under `build/` (which must exist): the directory is claimed with one
+`mkdir`, so two builds cannot share it, and `tests/release-outdir.sh`, part of `make verify-go`,
+checks the guard. Remove an old build yourself before reusing its name. `MANIFEST.json` records
+the commit, the tree, the source date, the sha256 of the exported source tar, the toolchain
+versions, the lockfile and `go.sum` hashes and each file's sha256, with no time or host name; the
+build fails unless the source zip carries the commit id, the commit time and exactly the
+exported files. Every Go binary uses `-trimpath` and an empty build id, archive times come from
+the commit time, and the Next build id is the commit. `make release-check` builds twice and fails
 unless both `SHA256SUMS` match, so a reproducibility claim needs a receipt from it. Publish the
 files, `MANIFEST.json` and `SHA256SUMS` unchanged with the tag.
 

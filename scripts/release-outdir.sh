@@ -1,27 +1,24 @@
 #!/usr/bin/env bash
-# release-outdir.sh OUT: validate and create a release output directory, then print its
-# absolute path. OUT must be a path that does not exist yet, or an existing empty directory,
-# strictly inside the repository's build/ directory (no "..", no symlink). Nothing is ever
-# removed here or by the caller: a release build never deletes a path it was given.
-# INBOX_RELEASE_BUILD_ROOT replaces build/ as the allowed root, for tests only.
+# release-outdir.sh OUT: claim a new release output directory and print its absolute path.
+# OUT must be a name that does not exist, as a direct child of the repository's build/
+# directory, which must already exist and not be a symbolic link. Every check runs before any
+# write, and the claim is a single mkdir without -p, which fails when the name exists, so two
+# concurrent builds cannot share a directory. Nothing is ever removed here or by the caller.
 set -euo pipefail
 die(){ echo "release output directory refused: $*" >&2; exit 2; }
 root=$(cd "$(dirname "$0")/.." && pwd -P)
-allowed=${INBOX_RELEASE_BUILD_ROOT:-$root/build}
+allowed=$root/build
 out=${1:-}
 [[ -n $out ]] || die 'no directory given'
 case $out in /*) ;; *) out=$PWD/$out;; esac
-case /$out/ in *"/../"*|*"/./"*) die "$out contains a relative component";; esac
+case /$out/ in *"/../"*|*"/./"*|*"//"*) die "$out contains a relative or empty component";; esac
 out=${out%/}
-case $out in "$allowed"/?*) ;; *) die "$out is not inside $allowed";; esac
-[[ ! -L $out ]] || die "$out is a symbolic link"
-if [[ -e $out ]]; then
-  [[ -d $out ]] || die "$out exists and is not a directory"
-  [[ -z $(ls -A "$out") ]] || die "$out is not empty; choose a new directory or empty it yourself"
-fi
-mkdir -p "$(dirname "$out")"
-physical=$(cd "$(dirname "$out")" && pwd -P)/$(basename "$out")
-allowed_physical=$(cd "$allowed" && pwd -P)
-case $physical in "$allowed_physical"/?*) ;; *) die "$out resolves outside $allowed";; esac
-mkdir -p "$physical"
+[[ $(dirname "$out") == "$allowed" ]] || die "$out is not a direct child of $allowed"
+name=$(basename "$out")
+[[ -n $name && $name != . && $name != .. ]] || die 'invalid name'
+[[ -d $allowed && ! -L $allowed ]] || die "$allowed does not exist or is a symbolic link; create it with mkdir build"
+[[ ! -e $out && ! -L $out ]] || die "$out already exists; choose a new name or remove it yourself"
+mkdir "$out" 2>/dev/null || die "$out was claimed by another build"
+physical=$(cd "$out" && pwd -P)
+[[ $physical == "$(cd "$allowed" && pwd -P)/$name" ]] || die "$out resolved outside $allowed"
 echo "$physical"
