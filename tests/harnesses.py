@@ -40,6 +40,19 @@ async def check(transport, message_id):
             assert (await session.call_tool("read", {"id": str(uuid4())})).isError
 
 
+async def denied(transport, message_id):
+    """An authorized seat that is not a party to an existing message must not read it."""
+    async with transport as streams:
+        async with ClientSession(*streams[:2]) as session:
+            await session.initialize()
+            assert json.loads((await session.call_tool("whoami", {})).content[0].text)["name"] == "unrelated"
+            result = await session.call_tool("read", {"id": message_id})
+            assert result.isError, "unrelated mailbox read an existing message over MCP"
+            assert "fixture" not in "".join(getattr(c, "text", "") for c in result.content)
+            listed = await session.call_tool("threads", {})
+            assert message_id not in "".join(getattr(c, "text", "") for c in listed.content)
+
+
 def exercise(origin, root, code):
     def post(path, data, cookie=""):
         req = Request(origin+"/api/"+path, json.dumps(data).encode(),
@@ -90,6 +103,15 @@ def exercise(origin, root, code):
         async with httpx.AsyncClient(headers={"Authorization":"Bearer "+bearer}, trust_env=False) as http:
             await check(streamable_http_client(origin+"/mcp",http_client=http),message)
     asyncio.run(remote())
+    other = StdioServerParameters(command=os.environ["INBOX_CLIENT"],args=["--seat","unrelated","mcp"],
+                                  env={"HOME":str(root),"OPENAGENTINBOX_PROFILE":str(profiles["reviewer"])})
+    asyncio.run(denied(stdio_client(other), message))
+    other_bearer = json.loads(profiles["unrelated"].read_text())["token"]
+    async def remote_denied():
+        async with httpx.AsyncClient(headers={"Authorization":"Bearer "+other_bearer}, trust_env=False) as http:
+            await denied(streamable_http_client(origin+"/mcp",http_client=http),message)
+    asyncio.run(remote_denied())
+    print("PASS an unrelated seat is denied an existing message over MCP stdio and HTTP")
     print("PASS Python send/replay, list, read, receipt, authorization and REAL completion reporting")
     print("PASS MCP SDK stdio and HTTP initialize, list, identity, read and tool errors; explicit seat overrides ambient profile")
 
