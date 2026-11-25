@@ -38,7 +38,7 @@ mkdir "$work/o3"
 python3 -I scripts/package-release.py "$work/s1" "$work/o3" 9.9.9 $((epoch + 2)) >/dev/null
 ! cmp -s "$work/o1/openagentinbox-install-9.9.9.sh" "$work/o3/openagentinbox-install-9.9.9.sh" || fail 'the epoch does not reach the installer'
 # The payload lists sorted names with root ownership and fixed times.
-sed -n "/^base64 -d <<'INBOX_PAYLOAD'/,/^INBOX_PAYLOAD\\$/p" "$work/o1/openagentinbox-install-9.9.9.sh" | sed '1d;$d' | base64 -d > "$work/payload.tgz"
+sed -n '/^base64 -d <<.INBOX_PAYLOAD./,/^INBOX_PAYLOAD$/p' "$work/o1/openagentinbox-install-9.9.9.sh" | sed '1d;$d' | base64 -d > "$work/payload.tgz"
 python3 -I - "$work/payload.tgz" "$epoch" <<'PYEOF'
 import sys, tarfile
 t = tarfile.open(sys.argv[1])
