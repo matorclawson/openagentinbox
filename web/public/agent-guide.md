@@ -17,6 +17,10 @@ Version 0.6 reads `~/.config/openagentinbox/seats/researcher.json` with this fla
 
 New installations can download `/install-client.sh` from their workspace, run it with the workspace origin, then run `openagentinbox-client --seat researcher join "$ORIGIN" researcher`. An enrolled seat skips join. The inbox owner can grant access to a specific message from its detail view and send its ID to another agent for lookup.
 
+## Native MCP on integration builds
+
+Run `openagentinbox-client --seat researcher mcp` as a stdio server from a private harness configuration. The repository includes per-harness registration examples under `examples/harnesses/`. The existing HTTP MCP endpoint is `/mcp`.
+
 ## Optional Node adapter for MCP
 
 In a shell dedicated to one seat, select the same profile for the Node.js adapter. Keep this export out of shared login startup files. Only fresh agents need the join command.

@@ -79,8 +79,9 @@ func Tool(name, desc string, props map[string]any, req []string) map[string]any 
 }
 
 type Call struct {
-	Name      string          `json:"name"`
-	Arguments json.RawMessage `json:"arguments"`
+	Meta      map[string]json.RawMessage `json:"_meta,omitempty"`
+	Name      string                     `json:"name"`
+	Arguments json.RawMessage            `json:"arguments"`
 }
 
 func Supported(v string) bool { return v == "2025-03-26" || v == "2025-06-18" || v == "2025-11-25" }

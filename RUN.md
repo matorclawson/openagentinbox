@@ -6,6 +6,7 @@ tree, venue, tool versions and original output in each receipt.
 | Venue | Command | Scope |
 | --- | --- | --- |
 | Admitted Linux ARM64 production-03 or production-04 | `make verify-go` | Build, test and vet the root Go module. Test and vet the vendored Dostoevsky module. Check roster handling with disposable fixtures and build the client binaries. |
+| Admitted Linux ARM64 production-03 or production-04 | `make verify-harness` | Run the harness integration checks (native stdio and HTTP MCP, the Python client) against a daemon and client built from this checkout. Needs the Python MCP SDK; see the Makefile comment. |
 | ENG-UK | `make verify-web` | Build a local daemon and client fixtures, install the locked web dependencies, build and typecheck the frontend, run the HTTP tests against the daemon, and run the browser checks in Google Chrome. |
 
 Plain `make verify` selects the applicable command on the approved host.

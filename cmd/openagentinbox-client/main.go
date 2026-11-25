@@ -211,11 +211,11 @@ func watch(ctx context.Context, path string, p profile) error {
 	return nil
 }
 
-const usage = "openagentinbox-client [--seat NAME] whoami | authorization | onboard ORIGIN [--watch|--install-worker] | verify ORIGIN CURRENT_NAME [MAILBOX_ID] | use-name ORIGIN CURRENT_NAME MAILBOX_ID | bind ORIGIN --token-stdin | login ORIGIN | status ORIGIN | tickets ORIGIN DIRECTORY | join ORIGIN NAME [--ticket-stdin] | host-info ORIGIN | handshake ORIGIN DIRECTORY | inbox|sent [BEFORE] | threads inbox|sent [BEFORE] | thread ROOT [BEFORE] | read ID | email-original ID | email-file TO SUBJECT BODY FILE [UUID] | send TO SUBJECT BODY [UUID] | request|urgent TO SUBJECT BODY [UUID] | reply ID TO SUBJECT BODY [UUID] | receipt ID | alerts | request-action accept|defer|resolve|decline ID [RFC3339] | watch | notify help"
+const usage = "openagentinbox-client [--seat NAME] mcp | whoami | authorization | onboard ORIGIN [--watch|--install-worker] | verify ORIGIN CURRENT_NAME [MAILBOX_ID] | use-name ORIGIN CURRENT_NAME MAILBOX_ID | bind ORIGIN --token-stdin | login ORIGIN | status ORIGIN | tickets ORIGIN DIRECTORY | join ORIGIN NAME [--ticket-stdin] | host-info ORIGIN | handshake ORIGIN DIRECTORY | inbox|sent [BEFORE] | threads inbox|sent [BEFORE] | thread ROOT [BEFORE] | read ID | email-original ID | email-file TO SUBJECT BODY FILE [UUID] | send TO SUBJECT BODY [UUID] | request|urgent TO SUBJECT BODY [UUID] | reply ID TO SUBJECT BODY [UUID] | receipt ID | alerts | request-action accept|defer|resolve|decline ID [RFC3339] | watch | notify help"
 
 func run(ctx context.Context, args []string) error {
 	if len(args) == 1 && args[0] == "version" {
-		fmt.Println("0.12.11")
+		fmt.Println("0.12.12")
 		return nil
 	}
 	if len(args) == 0 || args[0] == "help" {
@@ -238,7 +238,7 @@ func run(ctx context.Context, args []string) error {
 		seat, args = args[1], args[2:]
 		path = filepath.Join(home, ".config/openagentinbox/seats", seat+".json")
 		switch args[0] {
-		case "authorization", "notify", "whoami", "use-name", "bind", "verify", "inbox", "read", "send", "watch", "join":
+		case "mcp", "sent", "thread", "threads", "receipt", "reply", "alerts", "authorization", "notify", "whoami", "use-name", "bind", "verify", "inbox", "read", "send", "watch", "join":
 		default:
 			return errors.New("expected a seat command")
 		}
@@ -420,6 +420,8 @@ func run(ctx context.Context, args []string) error {
 			}
 			p.Name = a[1]
 			return installProfile(filepath.Join(filepath.Dir(path), p.Name+".json"), p)
+		case cmd == "mcp" && len(a) == 0:
+			return serveMCP(ctx, p, os.Stdin, os.Stdout)
 		case cmd == "notify":
 			return notifications(ctx, path, p, a)
 		case cmd == "verify" && (len(a) == 2 || len(a) == 3):
