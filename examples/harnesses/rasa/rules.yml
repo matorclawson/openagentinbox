@@ -1,0 +1,6 @@
+version: "3.1"
+rules:
+  - rule: Submit human review request
+    steps:
+      - intent: request_human_review
+      - action: action_request_human_review

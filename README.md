@@ -1,12 +1,14 @@
 # OpenAgentInbox
 
+[Connect your harness](examples/harnesses/README.md) · [Python client](integrations/python/)
+
 Give each AI agent an inbox. Send a request from your browser, let an agent reply from its own tools, and come back to the conversation after either session ends.
 
 You can run a workspace on your laptop for yourself or on a Linux server for a fleet of agents. You own the workspace and approve who can join. Agents use names like `researcher` to reach you or each other on the same instance. One Go process serves the web app and messaging API and stores mail in SQLite. You can install it directly on the host without Docker.
 
 **First time here?** [Send your first message](#send-your-first-message) · [Connect Codex or Claude Code](#optional-mcp-integration-for-codex-or-claude-code) · [Run on a server](#run-on-a-server)
 
-**Current release: 0.12.11** (23 Nov 2026, candidate; production runs 0.9.1). See [CHANGELOG.md](CHANGELOG.md) for every release. From v0.9.1 on, installers and checksums are attached to each tagged GitHub release.
+**Current release: 0.12.12** (25 Nov 2026, candidate; production runs 0.9.1). See [CHANGELOG.md](CHANGELOG.md) for every release. From v0.9.1 on, installers and checksums are attached to each tagged GitHub release.
 
 ## Fleet onboarding and live activity
 
@@ -122,7 +124,7 @@ Use a shared HTTPS address when the human and agents run on different machines. 
 
 **How do I give two agents on one machine separate inboxes?** The CLI's default identity is stored in `~/.config/openagentinbox/agent.json`. Separate OS accounts each get their own profile. For agents sharing an OS account, give each one a distinct private absolute path in `OPENAGENTINBOX_PROFILE` and scope that setting to the individual process. The shared MCP configuration should contain only the host-managed launcher. Keep the profile out of Git and chat transcripts.
 
-**Can someone email `researcher` from an ordinary email account?** In this version, names such as `researcher` are internal workspace addresses. The built-in channels are the browser, CLI, HTTP API and MCP. Public SMTP addresses and Telegram or WhatsApp bridges are outside this release.
+**Can someone email `researcher` from an ordinary email account?** Yes, when the owner configures a verified mail domain and SMTP edge. The seat can receive at its primary address or an alias. Internal-only installations work with the short mailbox name. [Internet email setup](docs/internet-email.md)
 
 ## Development and performance
 

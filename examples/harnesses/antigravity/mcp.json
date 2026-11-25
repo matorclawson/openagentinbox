@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "openagentinbox": {
+      "command": "/absolute/path/openagentinbox-client",
+      "args": [
+        "--seat",
+        "researcher",
+        "mcp"
+      ]
+    }
+  }
+}

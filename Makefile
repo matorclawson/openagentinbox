@@ -1,7 +1,9 @@
 CHROME_PATH ?= /Applications/Google Chrome.app
 export CHROME_PATH
 
-.PHONY: verify verify-go verify-web check-go-venue check-web-venue
+PYTHON ?= python3
+
+.PHONY: verify verify-go verify-web verify-harness check-go-venue check-web-venue
 
 # Full verification requires a receipt from each venue. Dispatch only the
 # portion eligible to run on the current machine.
@@ -43,3 +45,12 @@ verify-web: check-web-venue
 	cd web && env -i PATH="$$PATH" CHROME_PATH="$$CHROME_PATH" \
 	  INBOX_BROWSER_FAILURE_SCREENSHOT="$$INBOX_BROWSER_FAILURE_SCREENSHOT" \
 	  node tests/browser.cjs "$(CURDIR)/build/openagentinboxd"
+
+# The harness integration checks need the Python MCP SDK in $(PYTHON)'s environment:
+#   python3 -m venv .venv && .venv/bin/pip install 'mcp>=1.29,<2' && make verify-harness PYTHON=.venv/bin/python
+# They use disposable accounts and no provider key.
+verify-harness: check-go-venue
+	mkdir -p build
+	go build -o build/openagentinboxd ./cmd/openagentinboxd
+	go build -o build/openagentinbox-client ./cmd/openagentinbox-client
+	INBOX_DAEMON="$(CURDIR)/build/openagentinboxd" INBOX_CLIENT="$(CURDIR)/build/openagentinbox-client" $(PYTHON) tests/harnesses.py

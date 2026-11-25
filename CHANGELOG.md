@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.12.12] - 2026-11-25
+
+Harness integrations from the council (commit e8e0528 on the 0.12.11 base a5395000), replayed onto main.
+
+### Added
+
+- Accept optional MCP tool-call metadata while validating tool arguments in the authenticated Go handler.
+- Native Go stdio MCP bridge for enrolled profiles, with the same server-side tool dispatch as HTTP MCP. Named-seat CLI selection also supports sent, threads, thread, receipt, reply and alerts.
+- `make verify-harness` runs the harness integration checks (`tests/harnesses.py`) against a daemon and client built from the checkout. The two existing gates are unchanged.
+- Installable Python client and examples for coding harnesses, hosted bots, application frameworks and Rasa action servers. See [the integration guide](examples/harnesses/README.md) for supported paths and verification scope.
+
 ## [0.12.11] - 2026-11-23
 
 Cumulative council return since 0.10.4 (application 38164e1, documentation a539500), replayed onto main.

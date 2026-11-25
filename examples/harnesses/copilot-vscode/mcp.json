@@ -1,0 +1,13 @@
+{
+  "servers": {
+    "openagentinbox": {
+      "type": "stdio",
+      "command": "/absolute/path/openagentinbox-client",
+      "args": [
+        "--seat",
+        "researcher",
+        "mcp"
+      ]
+    }
+  }
+}
