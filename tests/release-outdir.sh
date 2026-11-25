@@ -65,7 +65,8 @@ if bash "$work/symrepo/scripts/release-outdir.sh" "$work/symrepo/build/x" >/dev/
 # Exclusive claim: of many concurrent claims on one name exactly one succeeds.
 for i in 1 2 3 4 5 6 7 8; do ( bash "$guard" "$repo/build/race" >/dev/null 2>&1 && touch "$work/won.$i" || true ) & done
 wait
-[[ $(ls "$work"/won.* | wc -l) == 1 ]] || fail "expected exactly one winner, got $(ls "$work"/won.* 2>/dev/null | wc -l)"
+winners=$(ls "$work"/won.* 2>/dev/null | wc -l | tr -d ' ')
+[[ $((winners)) -eq 1 ]] || fail "expected exactly one winner, got $winners"
 # No override of the allowed root, and the build script keeps no dirty override or output removal.
 ! grep -q 'INBOX_RELEASE_BUILD_ROOT' scripts/release-outdir.sh || fail 'the guard reads an environment override'
 ! grep -q 'ALLOW_DIRTY' scripts/build-release.sh || fail 'build-release.sh has a dirty-tree override'

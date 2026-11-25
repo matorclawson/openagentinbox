@@ -35,6 +35,7 @@ verify-go: check-go-venue
 	cd third_party/dostoevsky && go test ./... && go vet ./...
 	bash tests/roster-apply.sh
 	bash tests/release-outdir.sh
+	bash tests/release-package.sh
 	bash scripts/build-clients.sh dist/ui
 
 verify-web: check-web-venue
@@ -70,5 +71,6 @@ release-check: check-web-venue
 	mkdir -p build
 	bash scripts/build-release.sh build/release-check-$(COMMIT)-a
 	bash scripts/build-release.sh build/release-check-$(COMMIT)-b
+	diff build/release-check-$(COMMIT)-a/MANIFEST.json build/release-check-$(COMMIT)-b/MANIFEST.json
 	diff build/release-check-$(COMMIT)-a/SHA256SUMS build/release-check-$(COMMIT)-b/SHA256SUMS
 	@echo 'reproducible: both builds have identical checksums'

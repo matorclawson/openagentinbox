@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Write MANIFEST.json and SHA256SUMS for a release directory.
 
-Usage: release-manifest.py OUTDIR SRCDIR SOURCE.TAR   (inputs from the environment: COMMIT TREE VERSION EPOCH
+Usage: release-manifest.py OUTDIR SRCDIR SOURCE.TAR STAGE   (inputs from the environment: COMMIT TREE VERSION EPOCH
 GO_VERSION NODE_VERSION NPM_VERSION PY_VERSION UNAME)
 The manifest holds no wall-clock time or host name, so equal inputs give an equal manifest."""
 import hashlib, json, os, sys
 
 import tarfile, time, zipfile
-out, src, source_tar = sys.argv[1], sys.argv[2], sys.argv[3]
+out, src, source_tar, stage = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 sha = lambda p: hashlib.sha256(open(p, "rb").read()).hexdigest()
 env = os.environ
 
@@ -33,6 +33,12 @@ def verify_source(zip_path, tar_path):
     return hashlib.sha256(open(tar_path, "rb").read()).hexdigest()
 
 
+payload = {}
+for root, dirs, names in os.walk(stage):
+    dirs.sort()
+    for n in sorted(names):
+        p = os.path.join(root, n)
+        payload[os.path.relpath(p, stage)] = sha(p)
 source_tar_sha256 = verify_source(os.path.join(out, "openagentinbox-%s-source.zip" % env["VERSION"]), source_tar)
 files = {n: sha(os.path.join(out, n)) for n in sorted(os.listdir(out)) if n not in ("MANIFEST.json", "SHA256SUMS")}
 manifest = {
@@ -43,6 +49,7 @@ manifest = {
     "inputs": {"web/package-lock.json": sha(os.path.join(src, "web/package-lock.json")), "go.sum": sha(os.path.join(src, "go.sum")),
                "go.mod": sha(os.path.join(src, "go.mod"))},
     "files": files,
+    "installer_payload": payload,
 }
 with open(os.path.join(out, "MANIFEST.json"), "w") as f:
     json.dump(manifest, f, indent=2, sort_keys=True)
