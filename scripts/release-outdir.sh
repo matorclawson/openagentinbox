@@ -11,9 +11,10 @@ allowed=$root/build
 out=${1:-}
 [[ -n $out ]] || die 'no directory given'
 case $out in /*) ;; *) out=$PWD/$out;; esac
-case /$out/ in *"/../"*|*"/./"*|*"//"*) die "$out contains a relative or empty component";; esac
+case "$out/" in *"/../"*|*"/./"*|*"//"*) die "$out contains a relative or empty component";; esac
 out=${out%/}
-[[ $(dirname "$out") == "$allowed" ]] || die "$out is not a direct child of $allowed"
+parent=$(cd "$(dirname "$out")" 2>/dev/null && pwd -P) || die "$out is not a direct child of $allowed"
+[[ $parent == "$allowed" ]] || die "$out is not a direct child of $allowed"
 name=$(basename "$out")
 [[ -n $name && $name != . && $name != .. ]] || die 'invalid name'
 [[ -d $allowed && ! -L $allowed ]] || die "$allowed does not exist or is a symbolic link; create it with mkdir build"

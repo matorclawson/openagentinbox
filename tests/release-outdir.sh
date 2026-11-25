@@ -24,6 +24,15 @@ snapshot(){ (cd "$work" && find . -mindepth 1 | sort); }
 [[ $(bash "$guard" "$repo/build/rel-a") == "$physical/build/rel-a" ]] || fail 'new name'
 [[ -d $repo/build/rel-a ]] || fail 'the directory was not created'
 (cd "$repo" && bash scripts/release-outdir.sh build/rel-relative >/dev/null) || fail 'relative name'
+# Positive control: every output name the Makefile passes to the build script is accepted, as a
+# relative path from the repository root (how make runs it) and as an absolute path.
+names=$(grep -o 'scripts/build-release.sh build/[^ ]*' Makefile | sed 's|scripts/build-release.sh ||; s|\$(COMMIT)|0123456789ab|g')
+[[ $(echo "$names" | wc -l) -ge 3 ]] || fail 'could not read the output names from the Makefile'
+for name in $names; do
+  (cd "$repo" && bash scripts/release-outdir.sh "$name" >/dev/null) || fail "the guard refused the Makefile's own name $name"
+  [[ -d $repo/$name ]] || fail "the Makefile name $name was not created"
+  bash "$guard" "$repo/${name}-abs" >/dev/null || fail "the guard refused the absolute form of $name"
+done
 # Refused, and nothing is created or changed: compare the whole tree before and after.
 mkdir "$repo/build/empty" "$repo/build/full"; echo keep > "$repo/build/full/sentinel"; echo keep > "$repo/build/file"
 ln -s "$work/elsewhere" "$repo/build/link"; echo keep > "$work/elsewhere/sentinel"
