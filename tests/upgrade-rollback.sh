@@ -25,7 +25,15 @@
 # Stdout is one JSON receipt; the log goes to stderr. No secret is printed.
 set -euo pipefail
 shopt -s nullglob
-die(){ echo "FAIL: $*" >&2; exit 1; }
+die(){
+  echo "FAIL: $*" >&2
+  # Never leave a failure unexplained: show what the installer said last.
+  local f
+  for f in "${work:-/nonexistent}/upgrade.err" "${work:-/nonexistent}/upgrade.out"; do
+    [[ ! -s $f ]] || { echo "--- last lines of $(basename "$f")" >&2; tail -n 40 "$f" >&2; }
+  done
+  exit 1
+}
 [[ $EUID == 0 ]] || die 'run as root'
 [[ ${INBOX_ROLLBACK_TEST_DISPOSABLE:-} == yes ]] || die 'set INBOX_ROLLBACK_TEST_DISPOSABLE=yes to confirm this host is disposable'
 [[ $# == 2 && -f $1 && -f $2 ]] || die 'usage: upgrade-rollback.sh PREVIOUS-INSTALLER CANDIDATE-INSTALLER'
@@ -96,7 +104,9 @@ forced_unpack(){
   daemon="$work/forced/dist/linux-$arch/openagentinboxd"
   [[ -x $daemon ]] || die "candidate has no linux-$arch daemon"
   install -d -m 0755 "$real"
-  [[ -x $real/openagentinboxd ]] || cp "$daemon" "$real/openagentinboxd"
+  # The service account runs this copy, so it must be readable and executable by it whatever
+  # mode the packaged daemon has (a payload built under umask 077 is mode 0700).
+  [[ -x $real/openagentinboxd ]] || install -m 0755 "$daemon" "$real/openagentinboxd"
   cat > "$daemon" <<WRAPPER
 #!/bin/bash
 export INBOX_UI="\$(dirname "\$(readlink -f "\$0")")/ui"

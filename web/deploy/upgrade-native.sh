@@ -71,7 +71,11 @@ wait_health(){
 }
 wait_health "http://127.0.0.1:$port/api/health" "$instance" &&
 curl -fsS --max-time 3 "http://127.0.0.1:$port/api/health" | grep -Fq '"version":"0.12.12"' &&
-curl -fsS --max-time 3 -o /dev/null "http://127.0.0.1:$port/inboxes/operator" || { echo 'Candidate preflight failed. Current server is still serving.' >&2; exit 1; }
+curl -fsS --max-time 3 -o /dev/null "http://127.0.0.1:$port/inboxes/operator" || {
+  echo 'Candidate preflight failed. Current server is still serving.' >&2
+  { echo '  candidate output:'; tail -n 20 "$probe/log" 2>/dev/null | sed 's/^/  | /'; } >&2 || true
+  exit 1
+}
 cleanup
 pid=''
 trap - EXIT
