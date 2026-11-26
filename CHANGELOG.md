@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- An oversized stdio MCP frame (over 240000 bytes) now returns an error for that frame and the session continues. The error carries the request id when it precedes the oversized part, and `null` otherwise.
+
 ## [0.12.12] - 2026-11-25
 
 Harness integrations from the council (commit e8e0528 on the 0.12.11 base a5395000), replayed onto main.
