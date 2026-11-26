@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -80,7 +81,42 @@ func TestNoticeForAStandardSeatNamesOnlyTheSeat(t *testing.T) {
 	t.Setenv("HOME", home)
 	path := filepath.Join(home, ".config/openagentinbox/seats", "fixture-seat.json")
 	got := noticeText(profile{Name: "fixture-seat"}, path, noticeHead{Cursor: 7, Count: 101})
-	if got != "100+ new: openagentinbox-client --seat fixture-seat inbox" {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "100+ new: "+clientCommand(exe, home)+" --seat fixture-seat inbox" {
 		t.Fatalf("notice = %q", got)
+	}
+}
+
+func TestNoticeNamesTheRunningClientNotAnUnrelatedAlias(t *testing.T) {
+	home := t.TempDir()
+	bin := filepath.Join(home, ".local/bin")
+	if err := os.MkdirAll(bin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	exe := filepath.Join(bin, "openagentinbox-client")
+	alias := filepath.Join(bin, "oai")
+	for _, file := range []string{exe, alias} {
+		if err := os.WriteFile(file, []byte(file), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Something else already called oai is never named.
+	if got := clientCommand(exe, home); got != "~/.local/bin/openagentinbox-client" {
+		t.Fatalf("unrelated alias: %q", got)
+	}
+	if err := os.Remove(alias); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("openagentinbox-client", alias); err != nil {
+		t.Fatal(err)
+	}
+	if got := clientCommand(exe, home); got != "~/.local/bin/oai" {
+		t.Fatalf("own alias: %q", got)
+	}
+	if got := clientCommand(exe, "/elsewhere"); got != alias && got != shellQuote(alias) {
+		t.Fatalf("outside home: %q", got)
 	}
 }
