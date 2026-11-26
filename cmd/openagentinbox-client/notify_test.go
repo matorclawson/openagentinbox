@@ -44,7 +44,7 @@ func TestDeliverAdvancesOnlyAfterSuccessfulWake(t *testing.T) {
 	assertCursor(0)
 
 	if err := deliver(t.Context(), path, p, func(notice string) error {
-		if !strings.Contains(notice, "2 new deliveries for fixture-seat") || !strings.Contains(notice, "Mailbox cursor 31.") {
+		if !strings.HasPrefix(notice, "2 new: OPENAGENTINBOX_PROFILE="+shellQuote(path)+" ") || !strings.HasSuffix(notice, " inbox") {
 			t.Errorf("unexpected notification: %q", notice)
 		}
 		return nil
@@ -72,5 +72,15 @@ func TestNoticeReadyFocusAndDigest(t *testing.T) {
 	digest := noticeState{Mode: "digest", First: 100, Interval: 60, Last: 110}
 	if digest.ready(159) || digest.ready(169) || !digest.ready(170) {
 		t.Fatal("digest must respect both interval and cooldown")
+	}
+}
+
+func TestNoticeForAStandardSeatNamesOnlyTheSeat(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := filepath.Join(home, ".config/openagentinbox/seats", "fixture-seat.json")
+	got := noticeText(profile{Name: "fixture-seat"}, path, noticeHead{Cursor: 7, Count: 101})
+	if got != "100+ new: openagentinbox-client --seat fixture-seat inbox" {
+		t.Fatalf("notice = %q", got)
 	}
 }

@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- The delivery notice is one short line, for example `2 new: oai --seat researcher inbox`. It no longer carries the product name, the mailbox cursor or pagination advice, and names the profile path only when the profile is outside the standard seat directory.
+- The client installer adds `oai` as a short alias for `openagentinbox-client`, unless something else already has that name. Notices use the full name where the alias is absent.
+
 ## [0.12.12] - 2026-11-25
 
 Harness integrations from the council (commit e8e0528 on the 0.12.11 base a5395000), replayed onto main.
