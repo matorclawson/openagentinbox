@@ -1,6 +1,6 @@
-# Embedded Dostoevsky in OpenAgentInbox 0.10.4
+# Embedded Dostoevsky in OpenAgentInbox
 
-The application uses the canonical github.com/rodriveracom/dostoevsky module with an offline replacement in third_party/dostoevsky. The supplied upstream VERSION is 0.3.0 and its changelog identifies a candidate. The local v0.3.0-rc.3 requirement identifies this snapshot independently of public tags. Source archive SHA-256 is fb422713f1b5550fa8c30ae9d0265f13de4f6011b562ee4325a39608f9ad0ef6. Library Go files, sketches, module metadata, tests and license come from that archive.
+The application requires the github.com/rodriveracom/dostoevsky module from its public repository, at commit 94d7dfe927e0 (pseudo-version v0.3.1-0.20261126003528-94d7dfe927e0) until a later tag exists. There is no vendored copy. It uses the keyed notifications, batch-reader types and sketches; it does not open a Dostoevsky journal.
 
 ## What runs in production
 
@@ -22,7 +22,7 @@ Dostoevsky's journal PublishBatch can persist a prefix on an unsuccessful batch.
 
 ## Verify
 
-Run go test ./... and go vet ./... in the project root and in third_party/dostoevsky. Run the web tests with the new daemon and client assets. The release includes comparable JSONL measurements from 76 disposable inboxes with 10,000 historical messages each run. Use the stress driver's requests scenario for deadline workflows and burst for simultaneous arrivals. Production ARM64 disk latency and long-duration memory behavior need measurement on the target VPS.
+Run go test ./... and go vet ./... in the project root. Run the web tests with the new daemon and client assets. The release includes comparable JSONL measurements from 76 disposable inboxes with 10,000 historical messages each run. Use the stress driver's requests scenario for deadline workflows and burst for simultaneous arrivals. Production ARM64 disk latency and long-duration memory behavior need measurement on the target VPS.
 
 ### SQLite writer and memory changes in 0.10.2
 

@@ -6,6 +6,16 @@
 
 - An oversized stdio MCP frame (over 240000 bytes) now returns an error for that frame and the session continues. The error carries the request id when it precedes the oversized part, and `null` otherwise.
 
+## [0.12.13] - 2026-11-26
+
+### Changed
+- Requires the upstream, reviewed `github.com/rodriveracom/dostoevsky` at commit 94d7dfe927e0 (pseudo-version v0.3.1-0.20261126003528-94d7dfe927e0). The vendored `third_party/dostoevsky` copy and its `replace` in `go.mod` are removed. Source builds now fetch the module.
+
+### Fixed
+- Closes the known issue recorded in 0.10.4: releases embedded a pre-review Dostoevsky copy without upstream's later data-loss fixes, and were marked not to be deployed. Those fixes are in the journal, which OpenAgentInbox does not open; the notification, batch-reader and sketch sources it does use are unchanged by this update.
+
+Ephemeral 0.3.0 stays vendored: it matches upstream main (c250ba20) apart from the module path and a build constraint, and upstream has no v0.3.0 tag yet.
+
 ## [0.12.12] - 2026-11-25
 
 Harness integrations from the council (commit e8e0528 on the 0.12.11 base a5395000), replayed onto main.
