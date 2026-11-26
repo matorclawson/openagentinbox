@@ -75,7 +75,7 @@ The send command prints a retry UUID. Reuse it for the same submission following
 * Back up the live database with the application's online backup. It includes MIME originals, outbox rows and operator decisions. Monitor database/WAL bytes, backup restore time, edge queue age, disk free, oldest due outbox age, permanent refusals and uncertain attempts. SMTP spool and logs belong to the MTA. Capacity-plan original content per recipient. No automatic purge is enabled. Restoring an old snapshot requires reconciling queued sends against edge logs before enabling the relay again.
 * SMTPUTF8 addresses, IMAP, POP, public SMTP password submission, automatic complaint suppression and comprehensive MIME client rendering are outside this candidate. Agents submit through their authenticated Go API, CLI or MCP. Production acceptance requires a real public edge; see the Architect handoff in the release bundle.
 
-## First setup from the web desk (0.12.12)
+## First setup from the web desk (0.12.13)
 
 Sign in as the workspace owner and open **Mail setup**. If you already use a provider for personal or company email, choose a spare subdomain, for example agents.example.com. When asked for the IP, use the public address of the VPS that will run Postfix. If you host additional domains on that VPS, select the existing MX hostname in the advanced fields.
 
