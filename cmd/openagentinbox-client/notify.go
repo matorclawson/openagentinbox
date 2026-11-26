@@ -117,6 +117,7 @@ func head(ctx context.Context, p profile, after int64) (noticeHead, error) {
 	return h, e
 }
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
+
 // noticeText is a wake signal only, kept short because every harness pays for it.
 // The adapter labels the source, and the inbox itself says whether more pages exist.
 func noticeText(p profile, path string, h noticeHead) string {
