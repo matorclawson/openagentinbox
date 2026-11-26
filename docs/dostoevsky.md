@@ -1,6 +1,6 @@
 # Embedded Dostoevsky in OpenAgentInbox
 
-The application requires the github.com/rodriveracom/dostoevsky module from its public repository, at commit 94d7dfe927e0 (pseudo-version v0.3.1-0.20261126003528-94d7dfe927e0) until a later tag exists. There is no vendored copy. It uses the keyed notifications, batch-reader types and sketches; it does not open a Dostoevsky journal.
+The application requires the github.com/rodriveracom/dostoevsky module from its public repository, at tag v0.4.0 (commit f10c9d1b3a6b). There is no vendored copy. It uses the keyed notifications, batch-reader types and sketches; it does not open a Dostoevsky journal.
 
 ## What runs in production
 

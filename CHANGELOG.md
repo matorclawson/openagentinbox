@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.12.14] - 2026-11-26
+
+### Changed
+- Requires `github.com/rodriveracom/dostoevsky` at tag v0.4.0 (commit f10c9d1b3a6b) instead of a pseudo-version. The root package, `sketch` and `go.mod` of that module are unchanged from the commit 0.12.13 used.
+- The upgrade accepts a running 0.12.13 as well as the earlier versions.
+
 ## [0.12.13] - 2026-11-26
 
 ### Changed
