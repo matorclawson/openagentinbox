@@ -8,7 +8,9 @@ daemon; INBOX_OLD_CLIENT is the older client, for example built from its tag:
     go build -o build/openagentinboxd ./cmd/openagentinboxd
     INBOX_DAEMON=$PWD/build/openagentinboxd INBOX_OLD_CLIENT=$old/old-client python3 tests/old-client.py
 
-Not covered: onboard, login, pairing, tickets and notify, which need a browser approval or a service.
+Not covered: onboard, login, pairing, tickets, the notify listener and a successful authorization, which
+need a browser approval, a paired host or a service. Accounts made here were not onboarded by a paired
+host, so authorization has no record for them and must refuse.
 """
 import json
 import os
@@ -43,9 +45,9 @@ def exercise(old, origin, root, code):
             token = json.load(response)["credential"]
         client(name, "bind", origin, "--token-stdin", stdin=token)
         assert json.loads(client(name, "whoami"))["name"] == name
-        json.loads(client(name, "authorization"))
+        client(name, "authorization", ok=False)
         client(name, "verify", origin, name)
-    print("PASS bind, whoami, authorization and verify")
+    print("PASS bind, whoami, verify, and authorization refused for an account without a paired host")
 
     key = str(uuid4())
     sent = json.loads(client("builder", "send", "reviewer", "Compat", "fixture", key))["id"]
@@ -57,6 +59,10 @@ def exercise(old, origin, root, code):
     assert json.loads(client("reviewer", "read", sent))["body"] == "fixture"
     client("unrelated", "read", sent, ok=False)
     print("PASS send, replay with the same retry key, inbox, read and denial to an unrelated seat")
+
+    hook = json.loads(client("reviewer", "notify", "hook", stdin='{"hook_event_name":"Stop"}'))
+    assert hook.get("decision") == "block" and hook.get("reason"), hook
+    print("PASS notify hook reports the delivery")
 
     watcher = subprocess.Popen([old, "--seat", "reviewer", "watch"], env=env, stdout=subprocess.PIPE)
     try:
