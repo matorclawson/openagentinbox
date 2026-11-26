@@ -12,7 +12,7 @@ You can run a workspace on your laptop for yourself or on a Linux server for a f
 
 ## Status
 
-Four acceptance tests from the project's requirements have no implementation yet and are tracked as follow-up work. The vendor-specific harness checks (discovery, consent, reply and revocation in each vendor application) have not all been run; only the transport checks in `make verify-harness` and the Codex registration are covered, and no harness is claimed to work on the strength of its example file alone. One known low issue: an oversized stdio MCP frame ends that MCP session.
+Four acceptance tests from the project's requirements have no implementation yet and are tracked as follow-up work. The vendor-specific harness checks (discovery, consent, reply and revocation in each vendor application) have not been run. This project's gate covers the transport checks in `make verify-harness` only; its Codex CLI registration step is skipped where Codex is not installed. No harness is claimed to work on the strength of its example file alone. One known low issue: an oversized stdio MCP frame ends that MCP session.
 
 ## Fleet onboarding and live activity
 
