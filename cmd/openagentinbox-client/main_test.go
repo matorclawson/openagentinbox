@@ -52,3 +52,15 @@ func TestRunVerifyUsesSelectedSeatAndChecksMailbox(t *testing.T) {
 		t.Fatalf("verification requests = %d, want 2", got)
 	}
 }
+
+// Every mail command must be usable with --seat. With no profile on disk each one has to get
+// as far as reading the seat's profile, not be refused as an unknown seat command.
+func TestSeatAcceptsMailCommands(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	for _, cmd := range []string{"send", "request", "urgent", "reply", "request-action", "email-file", "email-original", "read", "receipt", "inbox"} {
+		err := run(t.Context(), []string{"--seat", "researcher", cmd, "a", "b", "c"})
+		if err == nil || strings.Contains(err.Error(), "expected a seat command") {
+			t.Fatalf("%s: %v", cmd, err)
+		}
+	}
+}
