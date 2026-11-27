@@ -25,7 +25,8 @@
 # When both releases have the same store schema, the migrated variant cannot migrate anything.
 # Set INBOX_ROLLBACK_SAME_SCHEMA=yes to run all variants anyway: the test then requires the
 # schemas to be identical and the receipt says "migration_exercised":false. Rehearse a real
-# migration separately, from an older PREVIOUS.
+# migration separately, from an older PREVIOUS. migration_exercised means only that the schema
+# SQL or user_version changed: a migration that rewrites data alone is not detected.
 # Stdout is one JSON receipt; the log goes to stderr. No secret is printed.
 set -euo pipefail
 shopt -s nullglob
@@ -331,6 +332,10 @@ forced_accepted(){
     grep -Eq '^private check ok port=[0-9]+ data=/var/lib/openagentinbox$' /var/lib/openagentinbox/test-private-check.log || die "late: the private check was not isolated: $(cat /var/lib/openagentinbox/test-private-check.log 2>/dev/null || echo 'no log')"
     ! grep -Fq 'port=4310' /var/lib/openagentinbox/test-private-check.log || die 'late: the private check listened on 4310'
   fi
+  # The mail settings exist only to prove the private check does not inherit them. They point at a
+  # socket the service cannot create, so a PREVIOUS release with email support would not start
+  # with them. Remove them before going back.
+  sed -i '/^INBOX_EMAIL_/d' /etc/openagentinbox/settings.env
   # Run the manual steps the installer printed, as an operator would: the printed text, one
   # block, in plain bash with no -e added.
   sed -n '/^  ($/,/^  )$/p' "$work/upgrade.err" > "$work/manual-restore.sh"
@@ -346,7 +351,7 @@ forced_accepted(){
   [[ $(readlink -e /opt/openagentinbox/active) != "$before_target" ]] || die "$mode: the release was switched after a wrong checksum"
   systemctl reset-failed openagentinbox.service || true
   bash "$work/manual-restore.sh" >&2 || die "$mode: the printed manual restore block failed"
-  wait_version "$old" || die "$mode: the previous release did not start from the kept copy"
+  wait_version "$old" || { journalctl -u openagentinbox.service -n 30 --no-pager >&2 || true; die "$mode: the previous release did not start from the kept copy"; }
   login_ok || die "$mode: owner login failed after recovery from the kept copy"
 }
 
@@ -356,7 +361,6 @@ forced_failure migrated 'forced failure migrated:'
 # The private check must not inherit any mail transport: configure all of them for this variant.
 printf 'INBOX_EMAIL_DOMAIN=inbox.test\nINBOX_EMAIL_SOCKET=/run/oai-test-lmtp.sock\nINBOX_EMAIL_RELAY=127.0.0.1:2525\nINBOX_EMAIL_SENDERS=operator\n' >> /etc/openagentinbox/settings.env
 forced_accepted late
-sed -i '/^INBOX_EMAIL_/d' /etc/openagentinbox/settings.env
 forced_accepted accepted
 direct_checks
 
