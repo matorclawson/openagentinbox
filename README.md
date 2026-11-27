@@ -1,39 +1,80 @@
 # OpenAgentInbox
 
-[Connect your harness](examples/harnesses/README.md) · [Python client](integrations/python/)
+**One inbox per agent, reachable from the web app, CLI, MCP and email today, with Slack and Microsoft Teams next.**
 
-Give each AI agent an inbox. Send a request from your browser, let an agent reply from its own tools, and come back to the conversation after either session ends.
+OpenAgentInbox is the self-hosted middleware between your agents and the channels people already use. Send a request from your browser, let an agent pick it up and reply from its own tools, and come back to it later: a thread is a conversation that outlives the session.
 
-You can run a workspace on your laptop for yourself or on a Linux server for a fleet of agents. You own the workspace and approve who can join. Agents use names like `researcher` to reach you or each other on the same instance. One Go process serves the web app and messaging API and stores mail in SQLite. You can install it directly on the host without Docker.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/conversation-dark.png">
+  <img src="docs/img/conversation-light.png" alt="A request from the operator, answered by the researcher agent and marked Replied">
+</picture>
 
-**First time here?** [Send your first message](#send-your-first-message) · [Connect Codex or Claude Code](#optional-mcp-integration-for-codex-or-claude-code) · [Run on a server](#run-on-a-server)
+*A request and its reply, kept together as one conversation.*
 
-**Current release: 0.12.13** (26 Nov 2026, candidate; production runs 0.9.1). See [CHANGELOG.md](CHANGELOG.md) for every release. From v0.9.1 on, installers and checksums are attached to each tagged GitHub release.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/activity-dark.png">
+  <img src="docs/img/activity-light.png" alt="Workspace activity with three enrolled agents, delivery health, one overdue request and the escalation summaries">
+</picture>
 
-## Fleet onboarding and live activity
+*The reviewer missed an urgent pickup deadline: it shows as overdue and the sender and operator are told.*
 
-The workspace shows new messages, agents awaiting approval, revocations and listening host clients. For several agents on one machine, open **Agents → Pair a CLI**, generate a token and paste it at the `openagentinbox-client login` prompt. Authorize the roster once for that client. Each agent claims its own inbox using a single-use ticket. The native client sends, reads and watches mail without MCP or a local mailbox server. [Install the client and enroll a fleet](web/public/host-guide.md).
+<img src="docs/img/receipt-light.png" alt="A message with delivery details: opened by researcher, first linked reply, request resolved">
 
-Find a seat in **Find an inbox**. Bookmark its Inbox or Sent view, or use **Copy message ID** on a message. To discuss it with a different agent, grant that agent read access and send it the ID. An enrolled agent can use the installed native client immediately.
+*Receipts: when it was opened, when it was answered, and that the request is resolved.*
 
-To upgrade a running 0.5.0, 0.6.0, 0.7.0, 0.8.0, 0.9.0, 0.9.1, 0.9.2, 0.10.0, 0.10.1, 0.10.2, 0.10.3, 0.10.4 or 0.11.0 systemd VPS, see the [in-place upgrade instructions](web/README.md#upgrade-a-running-vps).
+<img src="docs/img/phone-inbox-light.png" alt="The operator inbox on a phone" width="320">
 
-## Follow a request through to a reply
+<sub>Screenshots are from a throwaway instance with made-up agents and mail (<code>web/tests/screenshots.cjs</code>).</sub>
 
-Choose **Request** for a 15-minute pickup deadline, **Urgent request** for two minutes, or **FYI** for ordinary mail. Existing send commands default to FYI. Open a sent message to see when its recipient first fetched the body and first replied to it. Older messages begin with unknown receipt times. A linked reply resolves the request automatically.
+## Connectors
+
+Email mailboxes are the first connector to an outside channel.
+
+| Connector | Status | What that covers |
+| --- | --- | --- |
+| Web app | Available | The owner's workspace: read, compose, reply, approve agents, watch activity. |
+| Native CLI | Available | Per-agent send, request, reply, receipts and watch. |
+| MCP | Available | Mailbox tools over stdio and HTTP. [What has been verified](#status). |
+| Email (SMTP and LMTP) | Available, optional | Your own mail domain with a local Postfix edge: inbound over LMTP (up to 1 MiB), outbound through a local SMTP relay (one external recipient per send, one attachment up to 96 KiB). No IMAP, POP or SMTP submission. [Setup](docs/internet-email.md). |
+| Slack | Planned | |
+| Microsoft Teams | Planned | |
+
+## Quick start
+
+On Linux (ARM64 or AMD64) or an Apple Silicon Mac, download `openagentinbox-install-0.12.12.sh` and `SHA256SUMS` from the [latest release](https://github.com/rodriveracom/openagentinbox/releases/tag/v0.12.12), then:
 
 ```sh
-openagentinbox-client --seat editor request researcher "Review the draft" "Please check the figures."
-openagentinbox-client --seat researcher read MESSAGE_ID
-openagentinbox-client --seat researcher reply MESSAGE_ID editor "Figures checked" "The figures agree."
-openagentinbox-client --seat editor receipt MESSAGE_ID
+sha256sum --ignore-missing -c SHA256SUMS   # macOS: shasum -a 256 --ignore-missing -c SHA256SUMS
+bash openagentinbox-install-0.12.12.sh     # leave it running
 ```
 
-The recipient can also use `request-action accept ID [RFC3339]`, `defer` with a time, `decline`, or `resolve`. Acceptance defaults to a one-hour progress deadline. Use an offset or Z in CLI timestamps. The server records missed deadlines and sends a grouped summary to the original sender and the workspace operator. Set `INBOX_ESCALATION_MAILBOX` to direct the operator copy to an active fallback inbox. Urgent requests can reach the fallback before their deadline when the host is impaired or the listener has reported a busy, focused, muted or stale state. Unlinked messages with a similar subject remain independent.
+Open <http://127.0.0.1:4310> and create the owner account (the server prints where the setup code is). Then give an agent an inbox, in a second terminal:
 
-**Activity → Delivery health** shows the last silent check for each paired host, individual listener reports and overdue requests. Upgrade the native client and run the paired host worker with `onboard ORIGIN --install-worker` or supervise `onboard ORIGIN --watch`. A check passes when the worker receives a marker through the notification service, fetches it and confirms it. Three minutes without confirmation opens a host incident. This takes no model calls and creates no inbox mail. The CLI listener reports its own health independently, including while muted.
+```sh
+ORIGIN=http://127.0.0.1:4310
+curl -fsS "$ORIGIN/install-client.sh" -o install-client.sh && bash install-client.sh "$ORIGIN"
+client="$HOME/.local/bin/openagentinbox-client"
+"$client" --seat researcher join "$ORIGIN" researcher   # approve the printed URL, then run this line again
+"$client" --seat researcher send operator "Hello" "What should I work on first?"
+```
 
-In **Activity → Mail performance since restart**, inspect send and open latency and the estimated number of recipient inboxes. [Messaging performance and storage](docs/dostoevsky.md).
+That is a working inbox. The [longer walkthrough](#send-your-first-message) covers building from source, the approval step and replying.
+
+## Why not just Slack or Matrix?
+
+Chat is a good place to talk. Handing work to an agent also needs to know whether it was picked up, whether it was answered, and what happens when nobody does. That is what this is built around:
+
+- **Addressed requests with pickup deadlines.** A request has one recipient and a deadline: 15 minutes, or two for an urgent one. Opening it does not stop the clock. Accepting or deferring moves the deadline; declining, resolving or replying closes the request.
+- **Read and reply receipts.** See when the recipient first fetched a message and first replied.
+- **Replies resolve requests.** A linked reply closes the request; the recipient can also accept, defer, decline or resolve it.
+- **Missed deadlines are escalated.** The sender and the workspace operator get a grouped summary.
+- **Delivery health.** Silent checks per paired host, listener reports and overdue requests, with no model calls.
+- **Made for agent tools.** A native CLI, plus MCP over stdio and HTTP that harnesses such as Claude Code and Codex can register. See [what has been verified](#status).
+- **Small and yours.** One Go server process serves the web app and API and stores mail in SQLite, on your own machine or server. No Docker required.
+
+The Slack and Microsoft Teams connectors are not available yet, and there is no Matrix connector.
+
+**Documentation:** [Connect your harness](examples/harnesses/README.md) · [Python client](integrations/python/) · [Operating a workspace](docs/operating.md) · [Agent guide](web/public/agent-guide.md)
 
 ## Send your first message
 
@@ -126,6 +167,10 @@ Use a shared HTTPS address when the human and agents run on different machines. 
 
 **Can someone email `researcher` from an ordinary email account?** Yes, when the owner configures a verified mail domain and SMTP edge. The seat can receive at its primary address or an alias. Internal-only installations work with the short mailbox name. [Internet email setup](docs/internet-email.md)
 
+## Status
+
+Some acceptance tests from the project's requirements have no implementation yet and are tracked as follow-up work. The vendor-specific harness checks (discovery, consent, reply and revocation in each vendor application) have not been run. This project's gate covers the transport checks in `make verify-harness` only; its Codex CLI registration step is skipped where Codex is not installed. No harness is claimed to work on the strength of its example file alone. One known low issue: an oversized stdio MCP frame ends that MCP session.
+
 ## Development and performance
 
 The [Go messaging store](internal/deliverystore/) handles persistence and delivery. The [TypeScript web app](web/app/) renders the owner's workspace and ships as static assets served by the daemon. To run the backend checks from a checkout:
@@ -143,42 +188,10 @@ bash tests/stress.sh -seats 50 -scenarios mixed -rates 100,1000,10000 -duration 
 
 [Web build and integration tests](web/README.md#verification) · [Stress testing, bursts and backups](docs/stress-testing.md) · [Contributing](CONTRIBUTING.md)
 
+## Releases
+
+**Source version: 0.12.13** (26 Nov 2026, not yet tagged). Latest published release: [v0.12.12](https://github.com/rodriveracom/openagentinbox/releases/tag/v0.12.12). See [CHANGELOG.md](CHANGELOG.md) for every release. From v0.9.1 on, installers and checksums are attached to each tagged GitHub release. To upgrade a running server, see the [in-place upgrade instructions](web/README.md#upgrade-a-running-vps).
+
 ## License
 
 OpenAgentInbox is licensed under the [MIT License](LICENSE). Copyright © 2026 Dreamhuggers Pte. Ltd. Third-party components retain their respective terms.
-
-### When a seat name or its maintainer changes
-
-A mailbox has a permanent ID and can receive mail at several addresses. In **Agents → Rename inboxes from a roster**, paste two columns per line, such as `support support-maintainer`. Preview the mapping, then apply it. The directory shows the new name. Existing profiles, old addresses, bookmarked inboxes, messages and agent watches continue to work. Stored sender and recipient fields retain the original routing name.
-
-If both names already have inboxes, the preview flags the collision and the entire batch stays pending. Compare each inbox’s messages and mailbox ID before deciding which one to retain. This release supports renaming a mailbox and keeping aliases. Combining the histories or permissions of two existing inboxes requires a separate migration.
-
-For an existing profile named support, verify its live identity after the rename:
-
-```sh
-openagentinbox-client --seat support verify "$ORIGIN" support-maintainer
-```
-
-The result gives the current name, original address and permanent mailbox ID. Pass that ID as the final argument on later audits to verify both the chart name and the exact mailbox. A successful lookup does not imply a running harness session.
-
-For a change of custodian, keep the mailbox and use **Agents → Replace token**. The former credential loses access. On the successor’s machine, run `openagentinbox-client --seat support-maintainer bind "$ORIGIN" --token-stdin` with the replacement credential supplied through private stdin. Bind authenticates the token and verifies the current name before creating a private profile. It returns an error if a different profile occupies that path. Run verify against the expected permanent ID before declaring the handoff complete.
-
-For a chart rename (same seat, same credential), run the following after applying the mapping in Agents. Substitute the permanent ID returned by verify. The second command creates a private profile under the new name and checks the server, name and ID first. Existing profiles remain usable. Start only one watcher for the seat. A watch started under a new profile path can re-emit a fetch notification.
-
-    openagentinbox-client --seat support verify "$ORIGIN" support-maintainer
-    openagentinbox-client --seat support use-name "$ORIGIN" support-maintainer MAILBOX_ID
-    openagentinbox-client --seat support-maintainer verify "$ORIGIN" support-maintainer MAILBOX_ID
-
-## Activity and agent notifications
-
-Open **Activity** for the live feed, listening clients and enrollment totals. Bookmark `/activity` for a dedicated workspace monitor.
-
-For existing interactive seats, install the native client's turn-boundary hooks. For unattended seats, the client can wait for mail and start a named Claude Code or Codex session when its managed turn slot is free. Each seat can choose available, timed focus, mute or batched digests. [Set up agent notifications](web/public/notification-guide.md).
-
-### Onboard a host without seat-by-seat messages
-
-The workspace owner can authorize a list of seats directly in **Agents**. A paired host worker provisions new inboxes, verifies existing profiles, and reports the result per seat. The agent can retrieve its own authorization receipt. [Install the onboarding worker](web/public/host-guide.md#operator-authorized-unattended-onboarding).
-
-### Internet email for agents
-
-Give an enrolled agent an address on your own domain. It reads Internet mail alongside internal messages and can reply through the same CLI. The optional Go mail transport works with a local Postfix edge. [Set up a domain, send the first email, and inspect a delivery receipt](docs/internet-email.md).
