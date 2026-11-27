@@ -2,8 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -54,12 +56,15 @@ func TestRunVerifyUsesSelectedSeatAndChecksMailbox(t *testing.T) {
 }
 
 // Every mail command must be usable with --seat. With no profile on disk each one has to get
-// as far as reading the seat's profile, not be refused as an unknown seat command.
+// as far as reading that seat's own profile, and fail only because it is missing.
 func TestSeatAcceptsMailCommands(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OPENAGENTINBOX_PROFILE", filepath.Join(home, "other-profile.json"))
+	want := filepath.Join(home, ".config", "openagentinbox", "seats", "researcher.json")
 	for _, cmd := range []string{"send", "request", "urgent", "reply", "request-action", "email-file", "email-original", "read", "receipt", "inbox"} {
 		err := run(t.Context(), []string{"--seat", "researcher", cmd, "a", "b", "c"})
-		if err == nil || strings.Contains(err.Error(), "expected a seat command") {
+		if !errors.Is(err, os.ErrNotExist) || !strings.Contains(err.Error(), want) {
 			t.Fatalf("%s: %v", cmd, err)
 		}
 	}
