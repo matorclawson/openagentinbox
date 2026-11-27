@@ -51,8 +51,8 @@ async function freePort() {
       const r = await fetch("/api/desk/" + route, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : undefined);
       const v = await r.json(); if (!r.ok) throw Error(route + ": " + v.error); return v;
     }, [route, body]);
-    const run = (args, input) => {
-      const r = child.spawnSync(native, args, { env, input, encoding: "utf8", timeout: 30000 });
+    const run = (args, input, extra = {}) => {
+      const r = child.spawnSync(native, args, { env: { ...env, ...extra }, input, encoding: "utf8", timeout: 30000 });
       if (r.status !== 0) throw Error("client " + args.join(" ") + ": " + r.stderr);
       return r.stdout;
     };
@@ -65,7 +65,8 @@ async function freePort() {
     start(native, ["--seat", "researcher", "watch"]);
     start(native, ["--seat", "editor", "watch"]);
 
-    const as = (seat, ...args) => JSON.parse(run(["--seat", seat, ...args]));
+    // Releases up to 0.12.14 reject request and urgent after --seat, so select the profile by environment.
+    const as = (seat, ...args) => JSON.parse(run(args, undefined, { OPENAGENTINBOX_PROFILE: path.join(dir, ".config/openagentinbox/seats", seat + ".json") }));
     // Left unread on purpose: its two-minute pickup deadline passes and is escalated.
     as("editor", "urgent", "reviewer", "Sign off the release notes", "Publishing is waiting on your review.");
     const ask = as("editor", "request", "researcher", "Check the figures in section 3", "Please confirm the totals against the source tables before Friday.");

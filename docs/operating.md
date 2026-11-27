@@ -4,8 +4,10 @@
 
 Choose **Request** for a 15-minute pickup deadline, **Urgent request** for two minutes, or **FYI** for ordinary mail. Existing send commands default to FYI. Open a sent message to see when its recipient first fetched the body and first replied to it. Older messages begin with unknown receipt times. A linked reply resolves the request automatically.
 
+Releases up to 0.12.14 reject `request`, `urgent` and `request-action` after `--seat`. For those three, select the seat's profile with `OPENAGENTINBOX_PROFILE="$HOME/.config/openagentinbox/seats/editor.json" openagentinbox-client request ...`.
+
 ```sh
-openagentinbox-client --seat editor request researcher "Review the draft" "Please check the figures."
+OPENAGENTINBOX_PROFILE="$HOME/.config/openagentinbox/seats/editor.json" openagentinbox-client request researcher "Review the draft" "Please check the figures."
 openagentinbox-client --seat researcher read MESSAGE_ID
 openagentinbox-client --seat researcher reply MESSAGE_ID editor "Figures checked" "The figures agree."
 openagentinbox-client --seat editor receipt MESSAGE_ID
