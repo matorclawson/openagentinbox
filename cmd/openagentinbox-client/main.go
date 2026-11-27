@@ -238,7 +238,7 @@ func run(ctx context.Context, args []string) error {
 		seat, args = args[1], args[2:]
 		path = filepath.Join(home, ".config/openagentinbox/seats", seat+".json")
 		switch args[0] {
-		case "mcp", "sent", "thread", "threads", "receipt", "reply", "alerts", "authorization", "notify", "whoami", "use-name", "bind", "verify", "inbox", "read", "send", "watch", "join":
+		case "mcp", "sent", "thread", "threads", "receipt", "reply", "alerts", "authorization", "notify", "whoami", "use-name", "bind", "verify", "inbox", "read", "send", "watch", "join", "request", "urgent", "request-action", "email-file", "email-original":
 		default:
 			return errors.New("expected a seat command")
 		}

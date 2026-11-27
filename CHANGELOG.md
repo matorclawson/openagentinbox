@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- `openagentinbox-client --seat NAME` now accepts `request`, `urgent`, `request-action`, `email-file` and `email-original`. It answered "expected a seat command" before, although the guides show `--seat` with `request`.
+
 ## [0.12.13] - 2026-11-26
 
 ### Changed
