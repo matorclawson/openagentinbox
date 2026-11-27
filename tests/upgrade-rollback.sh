@@ -22,6 +22,10 @@
 #
 # Both arguments are packaged installers (openagentinbox-install-X.Y.Z.sh). The
 # candidate must support upgrading from the previous release's version.
+# When both releases have the same store schema, the migrated variant cannot migrate anything.
+# Set INBOX_ROLLBACK_SAME_SCHEMA=yes to run all variants anyway: the test then requires the
+# schemas to be identical and the receipt says "migration_exercised":false. Rehearse a real
+# migration separately, from an older PREVIOUS.
 # Stdout is one JSON receipt; the log goes to stderr. No secret is printed.
 set -euo pipefail
 shopt -s nullglob
@@ -40,6 +44,8 @@ die(){
 for p in /opt/openagentinbox /var/lib/openagentinbox /etc/systemd/system/openagentinbox.service; do
   [[ ! -e $p ]] || die "$p exists; refusing to touch a host that already has an installation"
 done
+same_schema=${INBOX_ROLLBACK_SAME_SCHEMA:-no}
+[[ $same_schema == yes || $same_schema == no ]] || die 'INBOX_ROLLBACK_SAME_SCHEMA must be yes or no'
 previous_installer=$(readlink -f "$1")
 candidate_installer=$(readlink -f "$2")
 domain=inbox.test
@@ -249,8 +255,13 @@ forced_failure(){
   failed_dir=$(ls -d /var/lib/openagentinbox/failed-upgrade-* | sort | tail -n 1)/attempt.0
   [[ -e $failed_dir/console.sqlite ]] || die "$mode: $failed_dir holds no store"
   # Proof that migration really happened: the failed store's schema differs from the
-  # previous release's. If it does not, PREVIOUS already has the candidate's schema.
-  [[ $(schema_digest "$failed_dir/console.sqlite") != "$digest_before" ]] || die "$mode: the failed store has the previous schema, so no migration was exercised; use an older PREVIOUS installer"
+  # previous release's. If it does not, PREVIOUS already has the candidate's schema. A run
+  # that declares the same schema must find exactly that.
+  if [[ $same_schema == yes ]]; then
+    [[ $(schema_digest "$failed_dir/console.sqlite") == "$digest_before" ]] || die "$mode: INBOX_ROLLBACK_SAME_SCHEMA is set but the candidate changed the schema; unset it"
+  else
+    [[ $(schema_digest "$failed_dir/console.sqlite") != "$digest_before" ]] || die "$mode: the failed store has the previous schema, so no migration was exercised; use an older PREVIOUS installer, or set INBOX_ROLLBACK_SAME_SCHEMA=yes if both releases share it"
+  fi
 }
 
 # early: the candidate cannot start, so the preflight must refuse it before the service is
@@ -345,5 +356,7 @@ login_ok || die 'owner login failed after the real upgrade'
 [[ $(count_matches '/var/lib/openagentinbox/upgrade-snapshots/pre-*.sqlite') -le 3 ]] || die 'old pre-upgrade copies were not pruned to three'
 [[ $(count_matches '/var/lib/openagentinbox/failed-upgrade-*') == 1 ]] || die 'a failed store was removed'
 
-printf '{"schema":"openagentinbox.upgrade-rollback/v2","status":"pass","variants":["early","hostile","migrated","late","accepted","direct","real"],"previous_version":"%s","candidate_version":"%s","previous_installer_sha256":"%s","candidate_installer_sha256":"%s","arch":"%s"}\n' \
-  "$old" "$new" "$(sha256sum <"$previous_installer" | cut -d' ' -f1)" "$(sha256sum <"$candidate_installer" | cut -d' ' -f1)" "$arch"
+migration=true
+[[ $same_schema == no ]] || migration=false
+printf '{"schema":"openagentinbox.upgrade-rollback/v2","status":"pass","migration_exercised":%s,"variants":["early","hostile","migrated","late","accepted","direct","real"],"previous_version":"%s","candidate_version":"%s","previous_installer_sha256":"%s","candidate_installer_sha256":"%s","arch":"%s"}\n' \
+  "$migration" "$old" "$new" "$(sha256sum <"$previous_installer" | cut -d' ' -f1)" "$(sha256sum <"$candidate_installer" | cut -d' ' -f1)" "$arch"
