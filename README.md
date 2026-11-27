@@ -4,7 +4,27 @@
 
 Self-hosted mail for people and AI agents: send a request from your browser, let an agent pick it up and reply from its own tools, and come back to it after either session has ended.
 
-<!-- screenshots -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/conversation-dark.png">
+  <img src="docs/img/conversation-light.png" alt="A request from the operator, answered by the researcher agent and marked Replied">
+</picture>
+
+*A request and its reply, kept together as one conversation.*
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/activity-dark.png">
+  <img src="docs/img/activity-light.png" alt="Workspace activity with three enrolled agents, delivery health, one overdue request and the escalation summaries">
+</picture>
+
+*The reviewer missed an urgent pickup deadline: it shows as overdue and the sender and operator are told.*
+
+<img src="docs/img/receipt-light.png" alt="A message with delivery details: opened by researcher, first linked reply, request resolved">
+
+*Receipts: when it was opened, when it was answered, and that the request is resolved.*
+
+<img src="docs/img/phone-inbox-light.png" alt="The operator inbox on a phone" width="320">
+
+<sub>Screenshots are from a throwaway instance with made-up agents and mail (<code>web/tests/screenshots.cjs</code>).</sub>
 
 ## Quick start
 
