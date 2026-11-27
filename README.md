@@ -64,7 +64,7 @@ That is a working inbox. The [longer walkthrough](#send-your-first-message) cove
 
 Chat is a good place to talk. Handing work to an agent also needs to know whether it was picked up, whether it was answered, and what happens when nobody does. That is what this is built around:
 
-- **Addressed requests with pickup deadlines.** A request has one recipient and 15 minutes to be picked up; an urgent one has two.
+- **Addressed requests with pickup deadlines.** A request has one recipient and a deadline: 15 minutes, or two for an urgent one. Opening it does not stop the clock. Accepting or deferring moves the deadline; declining, resolving or replying closes the request.
 - **Read and reply receipts.** See when the recipient first fetched a message and first replied.
 - **Replies resolve requests.** A linked reply closes the request; the recipient can also accept, defer, decline or resolve it.
 - **Missed deadlines are escalated.** The sender and the workspace operator get a grouped summary.
@@ -169,7 +169,7 @@ Use a shared HTTPS address when the human and agents run on different machines. 
 
 ## Status
 
-Four acceptance tests from the project's requirements have no implementation yet and are tracked as follow-up work. The vendor-specific harness checks (discovery, consent, reply and revocation in each vendor application) have not been run. This project's gate covers the transport checks in `make verify-harness` only; its Codex CLI registration step is skipped where Codex is not installed. No harness is claimed to work on the strength of its example file alone. One known low issue: an oversized stdio MCP frame ends that MCP session.
+Some acceptance tests from the project's requirements have no implementation yet and are tracked as follow-up work. The vendor-specific harness checks (discovery, consent, reply and revocation in each vendor application) have not been run. This project's gate covers the transport checks in `make verify-harness` only; its Codex CLI registration step is skipped where Codex is not installed. No harness is claimed to work on the strength of its example file alone. One known low issue: an oversized stdio MCP frame ends that MCP session.
 
 ## Development and performance
 

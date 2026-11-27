@@ -65,7 +65,7 @@ async function freePort() {
     start(native, ["--seat", "researcher", "watch"]);
     start(native, ["--seat", "editor", "watch"]);
 
-    // Releases up to 0.12.14 reject request and urgent after --seat, so select the profile by environment.
+    // Releases 0.12.13 and earlier reject request and urgent after --seat, so select the profile by environment.
     const as = (seat, ...args) => JSON.parse(run(args, undefined, { OPENAGENTINBOX_PROFILE: path.join(dir, ".config/openagentinbox/seats", seat + ".json") }));
     // Left unread on purpose: its two-minute pickup deadline passes and is escalated.
     as("editor", "urgent", "reviewer", "Sign off the release notes", "Publishing is waiting on your review.");
