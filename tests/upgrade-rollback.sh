@@ -46,6 +46,7 @@ for p in /opt/openagentinbox /var/lib/openagentinbox /etc/systemd/system/openage
 done
 same_schema=${INBOX_ROLLBACK_SAME_SCHEMA:-no}
 [[ $same_schema == yes || $same_schema == no ]] || die 'INBOX_ROLLBACK_SAME_SCHEMA must be yes or no'
+migration_exercised=unset
 previous_installer=$(readlink -f "$1")
 candidate_installer=$(readlink -f "$2")
 domain=inbox.test
@@ -180,12 +181,17 @@ WRAPPER
 }
 
 count_matches(){ local -a m=($1); echo "${#m[@]}"; }
-# Order-independent digest of the store's schema (table, index and trigger names).
+# Order-independent digest of the store's schema: every sqlite_master entry with its SQL (so an
+# added column counts) and the user_version. A store that cannot be read, or has no schema,
+# makes this fail; callers must not compare an empty result.
 schema_digest(){
-  runuser -u openagentinbox -- python3 -I -c 'import sqlite3,hashlib,sys; c=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro",uri=True); print(hashlib.sha256("\n".join(sorted(r[0] for r in c.execute("select type||\":\"||name from sqlite_master"))).encode()).hexdigest())' "$1"
+  runuser -u openagentinbox -- python3 -I -c 'import sqlite3,hashlib,sys
+c=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro",uri=True)
+rows=sorted(repr(tuple(r)) for r in c.execute("select type,name,tbl_name,sql from sqlite_master"))
+if not rows: sys.exit("store has no schema")
+rows.append("user_version="+str(c.execute("pragma user_version").fetchone()[0]))
+print(hashlib.sha256("\n".join(rows).encode()).hexdigest())' "$1"
 }
-
-# Run the installer's own stop proof and restore step, extracted from the file under test.
 installer_fn(){ sed -n "/^# BEGIN $1\$/,/^# END $1\$/p" "$work/forced/web/deploy/upgrade-native.sh"; }
 direct_checks(){
   local u=oai-stop-test d=$work/restore a b
@@ -226,9 +232,9 @@ direct_checks(){
 }
 
 forced_failure(){
-  local mode=$1 marker=$2 rc=0 digest_before failed_before snaps_before failed_dir
+  local mode=$1 marker=$2 rc=0 digest_before digest_after digest_failed failed_before snaps_before failed_dir
   echo "forced failure $mode: upgrade with a candidate that fails; it must roll back" >&2
-  digest_before=$(schema_digest /var/lib/openagentinbox/console.sqlite)
+  digest_before=$(schema_digest /var/lib/openagentinbox/console.sqlite) || die 'cannot read the store schema'
   failed_before=$(count_matches '/var/lib/openagentinbox/failed-upgrade-*')
   snaps_before=$(count_matches '/var/lib/openagentinbox/upgrade-snapshots/pre-*.sqlite')
   rm -f /var/lib/openagentinbox/test-private-check.log
@@ -245,7 +251,8 @@ forced_failure(){
   login_ok || die "$mode: owner login failed after rollback"
   [[ $(status /api/setup '{"username":"x","password":"another-long-password","code":"x"}') != 200 ]] || die "$mode: a fresh setup was accepted: data was lost"
   [[ $(status /api/login "{\"username\":\"owner\",\"password\":\"wrong-$password\"}") != 200 ]] || die "$mode: wrong password accepted"
-  [[ $(schema_digest /var/lib/openagentinbox/console.sqlite) == "$digest_before" ]] || die "$mode: the restored store does not have the previous schema"
+  digest_after=$(schema_digest /var/lib/openagentinbox/console.sqlite) || die "$mode: cannot read the restored store schema"
+  [[ $digest_after == "$digest_before" ]] || die "$mode: the restored store does not have the previous schema"
   [[ $(count_matches '/var/lib/openagentinbox/failed-upgrade-*') == $((failed_before + 1)) ]] || die "$mode: the failed store was not kept"
   [[ $(count_matches '/var/lib/openagentinbox/upgrade-snapshots/pre-*.sqlite') == $((snaps_before + 1)) ]] || die "$mode: no new pre-upgrade copy was kept"
   if [[ $mode == late ]]; then
@@ -257,10 +264,13 @@ forced_failure(){
   # Proof that migration really happened: the failed store's schema differs from the
   # previous release's. If it does not, PREVIOUS already has the candidate's schema. A run
   # that declares the same schema must find exactly that.
+  digest_failed=$(schema_digest "$failed_dir/console.sqlite") || die "$mode: cannot read the schema of the failed store"
+  migration_exercised=true
+  [[ $digest_failed != "$digest_before" ]] || migration_exercised=false
   if [[ $same_schema == yes ]]; then
-    [[ $(schema_digest "$failed_dir/console.sqlite") == "$digest_before" ]] || die "$mode: INBOX_ROLLBACK_SAME_SCHEMA is set but the candidate changed the schema; unset it"
+    [[ $migration_exercised == false ]] || die "$mode: INBOX_ROLLBACK_SAME_SCHEMA is set but the candidate changed the schema; unset it"
   else
-    [[ $(schema_digest "$failed_dir/console.sqlite") != "$digest_before" ]] || die "$mode: the failed store has the previous schema, so no migration was exercised; use an older PREVIOUS installer, or set INBOX_ROLLBACK_SAME_SCHEMA=yes if both releases share it"
+    [[ $migration_exercised == true ]] || die "$mode: the failed store has the previous schema, so no migration was exercised; use an older PREVIOUS installer, or set INBOX_ROLLBACK_SAME_SCHEMA=yes if both releases share it"
   fi
 }
 
@@ -271,7 +281,7 @@ refused_early(){
   local rc=0 pid_before digest_before failed_before snaps_before
   echo "forced failure $mode: the preflight must refuse the candidate and leave the service alone" >&2
   pid_before=$(systemctl show -p MainPID --value openagentinbox.service)
-  digest_before=$(schema_digest /var/lib/openagentinbox/console.sqlite)
+  digest_before=$(schema_digest /var/lib/openagentinbox/console.sqlite) || die 'cannot read the store schema'
   failed_before=$(count_matches '/var/lib/openagentinbox/failed-upgrade-*')
   snaps_before=$(count_matches '/var/lib/openagentinbox/upgrade-snapshots/pre-*.sqlite')
   printf 'PLANTED-SECRET-MARKER\n' > "$work/planted-secret"; chmod 0600 "$work/planted-secret"
@@ -289,7 +299,9 @@ refused_early(){
   [[ $(version_of) == "$old" ]] || die "early: service does not answer on $old"
   [[ $(readlink -e /opt/openagentinbox/active) == "$before_target" ]] || die "$mode: active release changed"
   login_ok || die "$mode: owner login failed"
-  [[ $(schema_digest /var/lib/openagentinbox/console.sqlite) == "$digest_before" ]] || die "$mode: the store schema changed"
+  local digest_after
+  digest_after=$(schema_digest /var/lib/openagentinbox/console.sqlite) || die "$mode: cannot read the store schema"
+  [[ $digest_after == "$digest_before" ]] || die "$mode: the store schema changed"
   [[ $(count_matches '/var/lib/openagentinbox/failed-upgrade-*') == "$failed_before" ]] || die "$mode: a failed-upgrade directory was created"
   [[ $(count_matches '/var/lib/openagentinbox/upgrade-snapshots/pre-*.sqlite') == "$snaps_before" ]] || die "$mode: a snapshot was taken before the preflight passed"
 }
@@ -356,7 +368,6 @@ login_ok || die 'owner login failed after the real upgrade'
 [[ $(count_matches '/var/lib/openagentinbox/upgrade-snapshots/pre-*.sqlite') -le 3 ]] || die 'old pre-upgrade copies were not pruned to three'
 [[ $(count_matches '/var/lib/openagentinbox/failed-upgrade-*') == 1 ]] || die 'a failed store was removed'
 
-migration=true
-[[ $same_schema == no ]] || migration=false
+[[ $migration_exercised == true || $migration_exercised == false ]] || die 'the migrated variant did not record a result'
 printf '{"schema":"openagentinbox.upgrade-rollback/v2","status":"pass","migration_exercised":%s,"variants":["early","hostile","migrated","late","accepted","direct","real"],"previous_version":"%s","candidate_version":"%s","previous_installer_sha256":"%s","candidate_installer_sha256":"%s","arch":"%s"}\n' \
-  "$migration" "$old" "$new" "$(sha256sum <"$previous_installer" | cut -d' ' -f1)" "$(sha256sum <"$candidate_installer" | cut -d' ' -f1)" "$arch"
+  "$migration_exercised" "$old" "$new" "$(sha256sum <"$previous_installer" | cut -d' ' -f1)" "$(sha256sum <"$candidate_installer" | cut -d' ' -f1)" "$arch"
