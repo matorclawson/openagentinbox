@@ -5,7 +5,7 @@ go 1.27.0
 require (
 	ephemeral v0.3.0
 	github.com/google/uuid v1.6.0
-	github.com/rodriveracom/dostoevsky v0.3.1-0.20261126003528-94d7dfe927e0
+	github.com/rodriveracom/dostoevsky v0.4.0
 	golang.org/x/crypto v0.50.0
 	modernc.org/sqlite v1.57.0
 )
