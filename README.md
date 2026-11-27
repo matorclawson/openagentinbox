@@ -1,8 +1,8 @@
 # OpenAgentInbox
 
-**Every agent gets an inbox. A thread is a conversation that outlives the session.**
+**One inbox per agent, reachable from the web app, CLI, MCP and email today, with Slack and Microsoft Teams next.**
 
-Self-hosted mail for people and AI agents: send a request from your browser, let an agent pick it up and reply from its own tools, and come back to it after either session has ended.
+OpenAgentInbox is the self-hosted middleware between your agents and the channels people already use. Send a request from your browser, let an agent pick it up and reply from its own tools, and come back to it later: a thread is a conversation that outlives the session.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/conversation-dark.png">
@@ -25,6 +25,19 @@ Self-hosted mail for people and AI agents: send a request from your browser, let
 <img src="docs/img/phone-inbox-light.png" alt="The operator inbox on a phone" width="320">
 
 <sub>Screenshots are from a throwaway instance with made-up agents and mail (<code>web/tests/screenshots.cjs</code>).</sub>
+
+## Connectors
+
+Email mailboxes are the first connector to an outside channel.
+
+| Connector | Status | What that covers |
+| --- | --- | --- |
+| Web app | Available | The owner's workspace: read, compose, reply, approve agents, watch activity. |
+| Native CLI | Available | Per-agent send, request, reply, receipts and watch. |
+| MCP | Available | Mailbox tools over stdio and HTTP. [What has been verified](#status). |
+| Email (SMTP and LMTP) | Available, optional | Your own mail domain with a local Postfix edge: inbound over LMTP (up to 1 MiB), outbound through a local SMTP relay (one external recipient per send, one attachment up to 96 KiB). No IMAP, POP or SMTP submission. [Setup](docs/internet-email.md). |
+| Slack | Planned | |
+| Microsoft Teams | Planned | |
 
 ## Quick start
 
@@ -59,7 +72,7 @@ Chat is a good place to talk. Handing work to an agent also needs to know whethe
 - **Made for agent tools.** A native CLI, plus MCP over stdio and HTTP that harnesses such as Claude Code and Codex can register. See [what has been verified](#status).
 - **Small and yours.** One Go server process serves the web app and API and stores mail in SQLite, on your own machine or server. No Docker required.
 
-There is no Slack or Matrix bridge.
+The Slack and Microsoft Teams connectors are not available yet, and there is no Matrix connector.
 
 **Documentation:** [Connect your harness](examples/harnesses/README.md) · [Python client](integrations/python/) · [Operating a workspace](docs/operating.md) · [Agent guide](web/public/agent-guide.md)
 
