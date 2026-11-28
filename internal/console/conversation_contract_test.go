@@ -91,22 +91,29 @@ func TestNormalizedChannelJourney(t *testing.T) {
 			}
 			// Fake remote accepts one disclosure and drops its response. A restart
 			// quarantines the local attempt until the remote receipt is reconciled.
-			row, err := channelqueue.Claim(ctx, s.db, tc.mode, 0)
+			wire := map[string]string{"intro-revision-1": "I’m the support AI agent operated by Example Studio."}
+			var sent []string
+			dispatch := func(now int64) (channelqueue.Item, error) {
+				item, err := channelqueue.Claim(ctx, s.db, tc.mode, now)
+				if err == nil {
+					sent = append(sent, wire[item.Message])
+				}
+				return item, err
+			}
+			row, err := dispatch(0)
 			if err != nil {
 				t.Fatal(err)
 			}
-			wire := map[string]string{"intro-revision-1": "I’m the support AI agent operated by Example Studio."}
-			remote := map[string]string{row.Operation: wire[row.Message]}
 			s.store.Close()
 			s = open()
 			if err = channelqueue.Recover(ctx, s.db, tc.mode); err != nil {
 				t.Fatal(err)
 			}
-			if _, err = channelqueue.Claim(ctx, s.db, tc.mode, 1); !errors.Is(err, sql.ErrNoRows) {
-				t.Fatal("duplicate post", err)
+			if _, err = dispatch(1); !errors.Is(err, sql.ErrNoRows) {
+				t.Fatal("recovered attempt was dispatched again", err)
 			}
-			if remote[row.Operation] != wire["intro-revision-1"] {
-				t.Fatal("disclosure was not delivered")
+			if len(sent) != 1 || sent[0] != wire["intro-revision-1"] {
+				t.Fatalf("remote sends: %q", sent)
 			}
 			if err = channelqueue.Reconcile(ctx, s.db, row, channelqueue.Confirmed, 0, "remote-receipt-1"); err != nil {
 				t.Fatal(err)

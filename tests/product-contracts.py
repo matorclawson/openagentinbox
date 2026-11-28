@@ -91,10 +91,11 @@ class ProductContracts(unittest.TestCase):
     def letter(self, **overrides):
         return {"to": "editor", "subject": "Révision", "body": "Private draft λ", "key": str(uuid4()), **overrides}
 
-    def tool(self, name, *args, ok=True, env=None):
+    def tool(self, name, *args, ok=True, env=None, error=""):
         result = subprocess.run([self.candidate / name, *args], env=env or self.env, timeout=10,
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode == 0, ok, f"{name} {args[:1]} exit {result.returncode}")
+        self.assertIn(error, result.stderr, f"{name} {args[:1]} failed for another reason")
         return result.stdout
 
     def test_send_retry_scope_and_thread_after_cutover(self):
@@ -159,7 +160,8 @@ class ProductContracts(unittest.TestCase):
             profile.touch(mode=0o600)
             profile.write_text(json.dumps({"name": seat, "token": self.tokens[seat], "origin": self.origin}))
         ambient = dict(self.env, OPENAGENTINBOX_PROFILE=str(profiles / "editor.json"))
-        self.tool("openagentinbox-client", "--seat", "visitor", "read", mid, env=ambient, ok=False)
+        refused = self.tool("openagentinbox-client", "--seat", "visitor", "read", mid, env=ambient, ok=False, error="HTTP 404:")
+        self.assertNotIn("Private draft", refused)
         read = self.tool("openagentinbox-client", "--seat", "editor", "read", mid)
         self.assertEqual(json.loads(read)["id"], mid)
         rpc = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "read", "arguments": {"id": mid}}}
