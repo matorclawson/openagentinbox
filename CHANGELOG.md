@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.13.0] - 2026-11-28
+
+### Changed
+- Sending, receiving and showing email now go through one delivery adapter around the existing mailbox transaction. The schema, operation keys and outbox are the same, and no behaviour change is intended.
+- The upgrade accepts a running 0.12.14 as well as the earlier versions.
+
+### In the source, not used by the daemon
+- Packages for a later channel adapter: a per-installation outbox (`internal/channelqueue`), request ownership fencing (`internal/channelrequest`) and installation-scoped bindings (`internal/channelbinding`). The daemon does not create their tables. Email is still the only connector to an outside channel.
+- `docs/design/conversation-adapters.md` describes the intended worker protocol and screens. Neither is built.
+
+### For development
+- A Go ownership inventory (`docs/design/go-ownership.md`), ten black-box product contracts (`make verify-product-contracts`, not part of `make verify`), seven submission-digest vectors and an email thread ancestry test.
+- Commit mapping: the inventory was contributed citing commit `f4032cd`; the equivalent commit in this repository is `cdc9414e`.
+
 ## [0.12.14] - 2026-11-27
 
 ### Changed

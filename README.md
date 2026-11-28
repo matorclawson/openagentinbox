@@ -190,7 +190,7 @@ bash tests/stress.sh -seats 50 -scenarios mixed -rates 100,1000,10000 -duration 
 
 ## Releases
 
-**Source version: 0.12.14** (27 Nov 2026, not yet tagged). Latest published release: [v0.12.12](https://github.com/rodriveracom/openagentinbox/releases/tag/v0.12.12). See [CHANGELOG.md](CHANGELOG.md) for every release. From v0.9.1 on, installers and checksums are attached to each tagged GitHub release. To upgrade a running server, see the [in-place upgrade instructions](web/README.md#upgrade-a-running-vps).
+**Source version: 0.13.0** (28 Nov 2026, not yet tagged). Latest published release: [v0.12.12](https://github.com/rodriveracom/openagentinbox/releases/tag/v0.12.12). See [CHANGELOG.md](CHANGELOG.md) for every release. From v0.9.1 on, installers and checksums are attached to each tagged GitHub release. To upgrade a running server, see the [in-place upgrade instructions](web/README.md#upgrade-a-running-vps).
 
 ## License
 
