@@ -17,7 +17,17 @@ CREATE TABLE IF NOT EXISTS channel_outbox (
   due INTEGER NOT NULL, attempt INTEGER NOT NULL DEFAULT 0, evidence TEXT NOT NULL DEFAULT '',
   PRIMARY KEY(installation,operation)
 ) WITHOUT ROWID;
-CREATE INDEX IF NOT EXISTS channel_due ON channel_outbox(installation,due,operation) WHERE state='queued';`
+CREATE INDEX IF NOT EXISTS channel_due ON channel_outbox(installation,due,operation) WHERE state='queued';
+CREATE TABLE IF NOT EXISTS channel_decisions (
+  installation TEXT NOT NULL, operation TEXT NOT NULL, attempt INTEGER NOT NULL,
+  decision TEXT NOT NULL, evidence TEXT NOT NULL, recorded INTEGER NOT NULL,
+  PRIMARY KEY(installation,operation,attempt)
+) WITHOUT ROWID;
+CREATE TRIGGER IF NOT EXISTS channel_record_decision AFTER UPDATE OF state ON channel_outbox
+WHEN OLD.state='uncertain' AND NEW.state!='uncertain'
+BEGIN
+ INSERT INTO channel_decisions VALUES(NEW.installation,NEW.operation,NEW.attempt,NEW.state,NEW.evidence,unixepoch());
+END;`
 
 type Item struct {
 	Installation, Operation, Binding, Message string

@@ -89,4 +89,8 @@ func TestCrashAfterRemoteAcceptance(t *testing.T) {
 	if err = Reconcile(ctx, db, first, Retryable, 0, "stale-decision"); !errors.Is(err, ErrStale) {
 		t.Fatal(err)
 	}
+	var evidence string
+	if err = db.QueryRow("SELECT evidence FROM channel_decisions WHERE installation=? AND operation=? AND attempt=?", first.Installation, first.Operation, first.Attempt).Scan(&evidence); err != nil || evidence != "receipt-1" {
+		t.Fatal("missing decision audit", evidence, err)
+	}
 }
