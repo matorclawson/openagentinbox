@@ -192,7 +192,7 @@ func (s *server) acceptLetter(ctx context.Context, envelope, rcpt string, raw []
 			return "", e
 		}
 	}
-	id, err := s.store.AcceptMail(ctx, key, m, time.Now(), func(tx *sql.Tx) error {
+	return s.acceptInbound(ctx, key, m, func(tx *sql.Tx) error {
 		if box != s.operator {
 			var active int
 			if err := tx.QueryRow("SELECT 1 FROM agents WHERE name=? AND key IS NOT NULL", box).Scan(&active); err != nil {
@@ -211,10 +211,6 @@ func (s *server) acceptLetter(ctx context.Context, envelope, rcpt string, raw []
 		_, err := tx.Exec("INSERT INTO email_original VALUES(?,?,?,?)", m.ID, envelope, wire, raw)
 		return err
 	})
-	if err == nil {
-		s.live.signal()
-	}
-	return id, err
 }
 func (s *server) originalEmail(_ http.ResponseWriter, r *http.Request) (any, error) {
 	actor, err := s.actor(r)
