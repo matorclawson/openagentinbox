@@ -74,3 +74,9 @@ release-check: check-web-venue
 	diff build/release-check-$(COMMIT)-a/MANIFEST.json build/release-check-$(COMMIT)-b/MANIFEST.json
 	diff build/release-check-$(COMMIT)-a/SHA256SUMS build/release-check-$(COMMIT)-b/SHA256SUMS
 	@echo 'reproducible: both builds have identical checksums'
+
+# Language-independent mailbox behavior. Supply already built binaries in OAI_BIN_DIR.
+.PHONY: verify-product-contracts
+verify-product-contracts:
+	@test -n "$(OAI_BIN_DIR)" || { echo 'Set OAI_BIN_DIR to the candidate binary directory.' >&2; exit 2; }
+	OAI_BIN_DIR="$(OAI_BIN_DIR)" OAI_REFERENCE_BIN_DIR="$(or $(OAI_REFERENCE_BIN_DIR),$(OAI_BIN_DIR))" $(PYTHON) tests/product-contracts.py
