@@ -35,17 +35,17 @@ Email mailboxes are the first connector to an outside channel.
 | Web app | Available | The owner's workspace: read, compose, reply, approve agents, watch activity. |
 | Native CLI | Available | Per-agent send, request, reply, receipts and watch. |
 | MCP | Available | Mailbox tools over stdio and HTTP. [What has been verified](#status). |
-| Email (SMTP and LMTP) | Available, optional | Your own mail domain with a local Postfix edge: inbound over LMTP (up to 1 MiB), outbound through a local SMTP relay (one external recipient per send, one attachment up to 96 KiB). No IMAP, POP or SMTP submission. [Setup](docs/internet-email.md). |
+| Email (SMTP and LMTP) | Available, optional | Your own mail domain with a local Postfix edge: inbound over LMTP (up to 1 MiB), outbound through a local SMTP relay (one external recipient per send, one attachment up to 96 KiB). No IMAP, POP or SMTP submission. Acceptance against a public production mail edge is still pending. [Setup](docs/internet-email.md). |
 | Slack | Planned | |
 | Microsoft Teams | Planned | |
 
 ## Quick start
 
-On Linux (ARM64 or AMD64) or an Apple Silicon Mac, download `openagentinbox-install-0.12.12.sh` and `SHA256SUMS` from the [latest release](https://github.com/rodriveracom/openagentinbox/releases/tag/v0.12.12), then:
+On Linux (ARM64 or AMD64) or an Apple Silicon Mac, download `openagentinbox-install-0.13.0.sh` and `SHA256SUMS` from the [latest release](https://github.com/rodriveracom/openagentinbox/releases/tag/v0.13.0), then:
 
 ```sh
 sha256sum --ignore-missing -c SHA256SUMS   # macOS: shasum -a 256 --ignore-missing -c SHA256SUMS
-bash openagentinbox-install-0.12.12.sh     # leave it running
+bash openagentinbox-install-0.13.0.sh     # leave it running
 ```
 
 Open <http://127.0.0.1:4310> and create the owner account (the server prints where the setup code is). Then give an agent an inbox, in a second terminal:
@@ -190,7 +190,7 @@ bash tests/stress.sh -seats 50 -scenarios mixed -rates 100,1000,10000 -duration 
 
 ## Releases
 
-**Source version: 0.13.0** (28 Nov 2026, not yet tagged). Latest published release: [v0.12.12](https://github.com/rodriveracom/openagentinbox/releases/tag/v0.12.12). See [CHANGELOG.md](CHANGELOG.md) for every release. From v0.9.1 on, installers and checksums are attached to each tagged GitHub release. To upgrade a running server, see the [in-place upgrade instructions](web/README.md#upgrade-a-running-vps).
+**Latest release: [v0.13.0](https://github.com/rodriveracom/openagentinbox/releases/tag/v0.13.0)** (28 Nov 2026). See [CHANGELOG.md](CHANGELOG.md) for every release. From v0.9.1 on, installers and checksums are attached to each tagged GitHub release. To upgrade a running server, see the [in-place upgrade instructions](web/README.md#upgrade-a-running-vps).
 
 ## License
 
