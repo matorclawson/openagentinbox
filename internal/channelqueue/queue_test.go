@@ -83,14 +83,23 @@ func TestCrashAfterRemoteAcceptance(t *testing.T) {
 	if posted[first.Operation] != 1 {
 		t.Fatal("missing remote receipt")
 	}
-	if err = Reconcile(ctx, db, first, Confirmed, 0, "receipt-1"); err != nil {
+	// Positive evidence of nonacceptance requeues the operation. The next attempt
+	// settles normally and overwrites the evidence held on the outbox row.
+	if err = Reconcile(ctx, db, first, Retryable, 0, "not-accepted-1"); err != nil {
 		t.Fatal(err)
 	}
-	if err = Reconcile(ctx, db, first, Retryable, 0, "stale-decision"); !errors.Is(err, ErrStale) {
+	again, err := Claim(ctx, db, x.Installation, 0)
+	if err != nil {
 		t.Fatal(err)
 	}
-	var evidence string
-	if err = db.QueryRow("SELECT evidence FROM channel_decisions WHERE installation=? AND operation=? AND attempt=?", first.Installation, first.Operation, first.Attempt).Scan(&evidence); err != nil || evidence != "receipt-1" {
-		t.Fatal("missing decision audit", evidence, err)
+	if err = Reconcile(ctx, db, first, Confirmed, 0, "stale-decision"); !errors.Is(err, ErrStale) {
+		t.Fatal(err)
+	}
+	if err = Finish(ctx, db, again, Confirmed, 0); err != nil {
+		t.Fatal(err)
+	}
+	var decision, evidence string
+	if err = db.QueryRow("SELECT decision,evidence FROM channel_decisions WHERE installation=? AND operation=? AND attempt=?", first.Installation, first.Operation, first.Attempt).Scan(&decision, &evidence); err != nil || decision != "queued" || evidence != "not-accepted-1" {
+		t.Fatal("earlier decision did not survive", decision, evidence, err)
 	}
 }

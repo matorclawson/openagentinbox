@@ -1,6 +1,6 @@
 # What OpenAgentInbox must carry into Rust
 
-The 0.12.14 channel council tree at `f4032cd033741eb74f6f307f446166c464f6c8c1` contains **77 first-party Go implementation files across 16 packages**, with 38 existing first-party Go test files at that revision. Five implementation files import either infrastructure library directly. All five implement mailbox-specific behavior around the library. Replacing the two libraries alone leaves the daemon, client, persistence and operations tools in Go.
+The 0.12.14 tree with the channel packages, at commit `cdc9414e283c489a0737d8de96beecb708649d95`, contains **77 first-party Go implementation files across 16 packages**, with 38 existing first-party Go test files at that revision. Five implementation files import either infrastructure library directly. All five implement mailbox-specific behavior around the library. Replacing the two libraries alone leaves the daemon, client, persistence and operations tools in Go.
 
 The inventory counts tracked .go files in cmd/, delivery/ and internal/. It excludes seven upstream engine files in third_party/ephemeral, module-cache and vendor files, and all non-Go code. “Owned” means this repository owns compatibility and maintenance; it does not mean every algorithm is unique. TypeScript UI, JavaScript CLI compatibility, Python integrations and deployment shell scripts remain callers of the same product contracts.
 
@@ -25,7 +25,7 @@ The inventory counts tracked .go files in cmd/, delivery/ and internal/. It excl
 | internal/channelrequest | 1 | Assignment revision, takeover, handoff, deadline, escalation once per assignment | request_test.go |
 | cmd/openagentinbox-stress | 4 | Local workload driver, corpus shaping, load-window/persistence accounting and RSS reporting | corpus_test.go, workload_test.go and tests/stress.sh; port or retain a language-neutral benchmark before retiring Go |
 
-The three channel packages are reviewed candidate code. Their SQL and transitions have tests, but the production daemon does not install their schemas on startup. Preserve the distinction between ordinary mailbox receipts, delivery to Runtime, and external transport delivery. Each proves a different event.
+The three channel packages are optional code that the daemon does not use. Their SQL and transitions have tests, but the production daemon does not install their schemas on startup. Preserve the distinction between ordinary mailbox receipts, delivery to Runtime, and external transport delivery. Each proves a different event.
 
 ## The five direct dependencies
 
@@ -43,7 +43,7 @@ Database/sql, the SQLite driver, UUIDs, crypto and the Go standard library are a
 
 The Python standard-library driver executes installed **binaries**. It imports no Go package, inference SDK, workflow engine or streaming library. Tests use a new temporary home and loopback instance each time. A future Rust binary can take the same place under each executable name. No live accounts, provider credentials, internet connection or configured service are needed for the runner.
 
-Build today’s reference on an admitted host, then run:
+Build today’s reference on Linux, then run:
 
 ```sh
 mkdir -p build/product-reference
@@ -72,7 +72,7 @@ With both directories supplied the reference daemon provisions the owner, creden
 
 The new Go email test covers same correspondent and inbox, different inbox, different correspondent, same subject only, and a reused remote Message-ID. A reply with an ambiguous reference must stay in its own thread. The test calls the real email acceptance path. Re-express those cases through LMTP when qualifying the Rust daemon.
 
-The seven language-neutral fixtures in internal/deliverystore/testdata/submission-digests.json pin the persisted operations digest. Body and ExternalPayloadDigest are base64 bytes; use UTF-8 byte counts for strings. Hash length-prefixed fields in order: sender, conversation ID, parent ID, subject, decimal priority, then the recipient count with its r prefix, each ordered recipient, body and optional markers for final, intent and transport digest. A field is decimal byte length, ASCII colon and exact bytes. Go’s generated message ID and transport-derived ThreadHint are excluded. Rust must match the full hex SHA-256 for every vector. The live replay tests also verify the effect of that digest when opening an existing store.
+The seven language-neutral fixtures in internal/deliverystore/testdata/submission-digests.json pin the persisted operations digest. Body and ExternalPayloadDigest are base64 bytes; use UTF-8 byte counts for strings. Hash length-prefixed fields in order: sender, conversation ID, parent ID, subject, decimal priority, then the recipient count with its r prefix, each ordered recipient, body, then the optional markers in this order: the field `final` when set; the field `intent/` followed by the intent when it is not empty; and, when there is a transport digest, the field `transport` followed by a field holding the digest bytes. A field is decimal byte length, ASCII colon and exact bytes. Go’s generated message ID and transport-derived ThreadHint are excluded. Rust must match the full hex SHA-256 for every vector. The live replay tests also verify the effect of that digest when opening an existing store.
 
 ## Cutover evidence still needed
 

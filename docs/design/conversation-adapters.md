@@ -1,6 +1,6 @@
 # Conversation adapters
 
-Council design for the 0.12.14 base. The first change routes existing mail through an in-process adapter. The optional SQL packages are building blocks for later installations. The following worker protocol, configuration screens and social rules describe the proposed integration.
+Design written against 0.12.14. The first change routes existing mail through an in-process adapter. The optional SQL packages are building blocks for later installations. The following worker protocol, configuration screens and social rules describe the proposed integration.
 
 ## Installation and authority
 
