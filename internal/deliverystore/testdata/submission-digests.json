@@ -1,0 +1,120 @@
+[
+  {
+    "name": "legacy-plain",
+    "message": {
+      "ID": "fixture-1",
+      "Sender": "a",
+      "ConversationID": "",
+      "ParentID": "",
+      "Subject": "review",
+      "Priority": 1,
+      "Recipients": [
+        "b"
+      ],
+      "Body": "aGk="
+    },
+    "sha256": "dcde45ea680deaee3eaf91ab194b62932dd48fb462c5b903e88d48c2eca118bd"
+  },
+  {
+    "name": "derived-id-and-thread-hint-ignored",
+    "message": {
+      "ID": "other-id",
+      "Sender": "a",
+      "ConversationID": "",
+      "ParentID": "",
+      "Subject": "review",
+      "Priority": 1,
+      "Recipients": [
+        "b"
+      ],
+      "Body": "aGk=",
+      "ThreadHint": "derived-root"
+    },
+    "sha256": "dcde45ea680deaee3eaf91ab194b62932dd48fb462c5b903e88d48c2eca118bd"
+  },
+  {
+    "name": "one-comma-address",
+    "message": {
+      "ID": "fixture-1",
+      "Sender": "a",
+      "ConversationID": "",
+      "ParentID": "",
+      "Subject": "review",
+      "Priority": 1,
+      "Recipients": [
+        "a,b"
+      ],
+      "Body": "aGk="
+    },
+    "sha256": "e4660fea845dabd40d64513409c5e65e59fe9bb04f7c477e68613e3754ec28ab"
+  },
+  {
+    "name": "two-addresses",
+    "message": {
+      "ID": "fixture-1",
+      "Sender": "a",
+      "ConversationID": "",
+      "ParentID": "",
+      "Subject": "review",
+      "Priority": 1,
+      "Recipients": [
+        "a",
+        "b"
+      ],
+      "Body": "aGk="
+    },
+    "sha256": "7595a1c6a8682b13e570d19351684694555b916b15c48a90aad9b7790c5e3251"
+  },
+  {
+    "name": "ordered-addresses",
+    "message": {
+      "ID": "fixture-1",
+      "Sender": "a",
+      "ConversationID": "",
+      "ParentID": "",
+      "Subject": "review",
+      "Priority": 1,
+      "Recipients": [
+        "b",
+        "a"
+      ],
+      "Body": "aGk="
+    },
+    "sha256": "a73f272e4c5a584dd23f0536baaed721bdede6e8a92c615caa779b23e96e14d1"
+  },
+  {
+    "name": "unicode-and-binary",
+    "message": {
+      "ID": "fixture-1",
+      "Sender": "a\u0000b",
+      "ConversationID": "c",
+      "ParentID": "p",
+      "Subject": "révision λ",
+      "Priority": 1,
+      "Recipients": [
+        "b"
+      ],
+      "Body": "AP8="
+    },
+    "sha256": "b6ca1753a9a79d45153ff33fe2f7b56ce94cff8cf69d62c675d04ec72af71a4e"
+  },
+  {
+    "name": "final-request-with-transport",
+    "message": {
+      "ID": "fixture-1",
+      "Sender": "a",
+      "ConversationID": "",
+      "ParentID": "",
+      "Subject": "review",
+      "Priority": 1,
+      "Recipients": [
+        "b"
+      ],
+      "Body": "aGk=",
+      "Final": true,
+      "Intent": "request",
+      "ExternalPayloadDigest": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+    },
+    "sha256": "7ccf61edca540200bea6177c2d50c9d25437ad47e1ffb060c88f82b0b16658a4"
+  }
+]
