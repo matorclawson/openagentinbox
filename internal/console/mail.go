@@ -134,51 +134,21 @@ func (s *server) send(_ http.ResponseWriter, r *http.Request) (any, error) {
 	if e != nil {
 		return nil, e
 	}
-	var q struct {
-		To, Subject, Body, Key, Intent, ReplyTo, FileName string
-		FileData                                          []byte
-	}
+	var q sendFields
 	if e = input(r, &q); e != nil {
 		return nil, e
 	}
 	q.Subject = strings.TrimSpace(q.Subject)
 	q.Body = strings.TrimSpace(q.Body)
-	external := strings.Contains(q.To, "@")
-	localDomain := false
-	if external {
-		_, d, _ := strings.Cut(q.To, "@")
-		localDomain, e = s.hosted(r.Context(), strings.ToLower(d))
-		if e != nil {
-			return nil, e
-		}
+	route, e := s.resolveDelivery(r.Context(), src, &q)
+	if e != nil {
+		return nil, e
 	}
-	if external && localDomain && q.ReplyTo == "" {
-		box, err := s.emailBox(r.Context(), q.To)
-		if err != nil {
-			return nil, err
-		}
-		q.To = box
-		external = false
-	}
-	if (q.FileName != "" || q.FileData != nil) && (!external || !fileNameRE.MatchString(q.FileName) || len(q.FileData) > 96<<10 || len(q.FileData) == 0) {
-		return nil, failure{400, "External attachment needs a safe filename and 1 to 98304 bytes"}
-	}
-	if external {
-		if q.ReplyTo != "" {
-			q.To = strings.TrimPrefix(q.To, "external:")
-		}
-		if !s.maySend(src) {
-			return nil, failure{403, "External email sending is disabled for this mailbox"}
-		}
-		if !validEmail(q.To) || localDomain || strings.ContainsAny(q.Subject, "\r\n\x00") || (q.Intent != "" && q.Intent != "fyi") {
-			return nil, failure{400, "Use an external address, single-line subject and FYI intent"}
-		}
-	}
-	if (!external && !nameRE.MatchString(q.To)) || len(q.Subject) == 0 || len([]rune(q.Subject)) > 240 || len(q.Body) == 0 || len([]rune(q.Body)) > 48000 || uuid.Validate(q.Key) != nil {
+	if (route == nil && !nameRE.MatchString(q.To)) || len(q.Subject) == 0 || len([]rune(q.Subject)) > 240 || len(q.Body) == 0 || len([]rune(q.Body)) > 48000 || uuid.Validate(q.Key) != nil {
 		return nil, failure{400, "Invalid message fields"}
 	}
 
-	if !external && q.To != s.operator {
+	if route == nil && q.To != s.operator {
 		if e = s.store.Reader().QueryRowContext(r.Context(), "SELECT box FROM addresses WHERE address=?", q.To).Scan(&q.To); e != nil {
 			return nil, e
 		}
@@ -204,7 +174,7 @@ func (s *server) send(_ http.ResponseWriter, r *http.Request) (any, error) {
 			if err := tx.QueryRow("SELECT m.sender FROM messages m JOIN deliveries d USING(seq) WHERE m.id=? AND d.seat=?", q.ReplyTo, src).Scan(&parent); err != nil {
 				return err
 			}
-			if parent != q.To && !(external && parent == "external:"+q.To) {
+			if parent != q.To && !(route != nil && parent == route.replyAddress) {
 				return failure{400, "Reply must go to the original sender"}
 			}
 			_, err := tx.Exec(`INSERT INTO mail_receipts(id,seat,replied) VALUES(?,?,?) ON CONFLICT(id,seat) DO UPDATE SET replied=coalesce(replied,excluded.replied),state=CASE WHEN state='fyi' THEN state ELSE 'resolved' END,due=NULL`, q.ReplyTo, src, timestamp.UnixMilli())
@@ -212,8 +182,8 @@ func (s *server) send(_ http.ResponseWriter, r *http.Request) (any, error) {
 				return err
 			}
 		}
-		if external {
-			return s.enqueueLetter(tx, msg, q.FileName, q.FileData)
+		if route != nil {
+			return route.enqueue(tx, msg, q.FileName, q.FileData)
 		}
 		if q.Intent == "" {
 			return nil
@@ -229,11 +199,8 @@ func (s *server) send(_ http.ResponseWriter, r *http.Request) (any, error) {
 		return nil, failure{409, "Request key already used for different content"}
 	}
 	if e == nil {
-		if external {
-			select {
-			case s.email.wake <- struct{}{}:
-			default:
-			}
+		if route != nil {
+			route.wake()
 		}
 		s.performance.observe(true, q.To, time.Since(started))
 		s.live.signal()
@@ -356,17 +323,10 @@ func (s *server) detail(_ http.ResponseWriter, r *http.Request) (any, error) {
 	if strings.Contains(audience, ", ") {
 		result["audience"] = strings.Split(audience, ", ")
 	}
-	if strings.HasPrefix(src, "external:") {
-		result["channel"] = "email"
-		result["trust"] = "external"
-		result["original_available"] = actor == dst || strings.HasPrefix(r.URL.Path, "/api/desk/")
-	}
-	if strings.Contains(dst, "@") {
-		var status string
-		if err := s.store.Reader().QueryRowContext(r.Context(), "SELECT state FROM email_outbox WHERE id=?", id).Scan(&status); err != nil {
+	for _, adapter := range s.deliveryAdapters() {
+		if err := adapter.detail(r.Context(), result, id, src, dst, actor, desk); err != nil {
 			return nil, err
 		}
-		result["email_status"] = status
 	}
 	return result, nil
 }
